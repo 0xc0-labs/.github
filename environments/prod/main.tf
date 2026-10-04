@@ -5,7 +5,7 @@ module "repositories" {
   name                = each.key
   description         = each.value.description
   topics              = each.value.topics
-  visibility          = "public"
+  visibility          = each.value.visibility
   auto_init           = each.value.auto_init
   ruleset_enforcement = var.bootstrap || each.value.bootstrap ? "disabled" : "active"
 

@@ -32,6 +32,9 @@ variable "repositories" {
   type = map(object({
     description = string
     topics      = optional(list(string), [])
+    # A private repo gets no ruleset: the Free plan applies them to public
+    # repos only.
+    visibility = optional(string, "public")
     # CI applies wait for the operator's approval.
     production_environment = optional(bool, false)
     # Brand new, no history: an initial commit lets its ruleset start active.

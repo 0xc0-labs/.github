@@ -41,6 +41,12 @@ repositories = {
     auto_init       = true
     required_checks = ["issue / check"]
   }
+  "artistlabco.com" = {
+    description = "Website for artistlabco.com"
+    topics      = ["0xc0"]
+    visibility  = "private"
+    auto_init   = true
+  }
 }
 
 # Only the repos whose CI needs the network.
