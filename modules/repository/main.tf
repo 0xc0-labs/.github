@@ -36,7 +36,10 @@ resource "github_repository_vulnerability_alerts" "main" {
   enabled    = true
 }
 
+# The Free plan applies rulesets to public repos only.
 resource "github_repository_ruleset" "main" {
+  count = var.visibility == "public" ? 1 : 0
+
   name        = "default-branch"
   repository  = github_repository.main.name
   target      = "branch"
@@ -103,4 +106,9 @@ resource "github_repository_environment_deployment_policy" "main" {
   repository     = github_repository.main.name
   environment    = github_repository_environment.main[0].environment
   branch_pattern = "main"
+}
+
+moved {
+  from = github_repository_ruleset.main
+  to   = github_repository_ruleset.main[0]
 }
