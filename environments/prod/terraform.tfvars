@@ -1,6 +1,7 @@
 operator_user_id = 94703619 # sergioaten
 
-# Topics: 0xc0 on every repo, plus one per tool the repo actually contains.
+# Topics: 0xc0 on every repo, app on every application, plus one per tool
+# the repo actually contains.
 repositories = {
   ".github" = {
     description            = "Organization Terraform, reusable workflows and org-wide templates"
@@ -37,15 +38,21 @@ repositories = {
   }
   "offby1.cc" = {
     description     = "Landing page for offby1.cc"
-    topics          = ["0xc0", "nextjs"]
+    topics          = ["0xc0", "app", "nextjs"]
     auto_init       = true
     required_checks = ["issue / check"]
   }
   "artistlabco.com" = {
     description = "Website for artistlabco.com"
-    topics      = ["0xc0"]
+    topics      = ["0xc0", "app"]
     visibility  = "private"
     auto_init   = true
+  }
+  "payload" = {
+    description     = "Payload CMS: multi-tenant backend for the frontends"
+    topics          = ["0xc0", "app", "payload", "nextjs"]
+    auto_init       = true
+    required_checks = ["issue / check"]
   }
 }
 
