@@ -48,6 +48,7 @@ operator's approval. Logs, metrics and traces go to OpenObserve.
 | [`gitops`](https://github.com/0xc0-labs/gitops) | ArgoCD manifests for the cluster |
 | [`vault`](https://github.com/0xc0-labs/vault) | OpenTofu configuration of the cluster's Vault |
 | [`offby1.cc`](https://github.com/0xc0-labs/offby1.cc) | The offby1.cc landing page |
+| [`payload`](https://github.com/0xc0-labs/payload) | Payload CMS, the multi-tenant backend of the frontends |
 | [`claude-config`](https://github.com/0xc0-labs/claude-config) | Claude Code plugin: agents, skills and guardrail hooks |
 
 ## Principles
