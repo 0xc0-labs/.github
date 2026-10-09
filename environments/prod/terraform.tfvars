@@ -49,10 +49,10 @@ repositories = {
     auto_init   = true
   }
   "payload" = {
-    description     = "Payload CMS: multi-tenant backend for the frontends"
-    topics          = ["0xc0", "app", "payload", "nextjs"]
-    auto_init       = true
-    required_checks = ["issue / check"]
+    description = "Payload CMS: multi-tenant backend for the frontends"
+    topics      = ["0xc0", "app", "payload", "nextjs"]
+    visibility  = "private"
+    auto_init   = true
   }
 }
 
