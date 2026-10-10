@@ -26,7 +26,9 @@ into the workspace repo at exactly the path GitHub reads.
   and apply an OpenTofu root; `org-plan` and `org-apply` run them for this
   repo. `packer` validates a repo's Packer templates, and rebuilds the ones a
   push affects, one job per chain of clones, in parallel.
-  `hook-tests` runs a repo's hook test cases. `ansible` runs a repo's
+  `hook-tests` runs a repo's hook test cases. `plugin-version` fails a PR
+  that changes a Claude Code plugin without bumping its version, or whose
+  marketplace entry declares another one. `ansible` runs a repo's
   playbooks the change affects, each in its own job, in parallel: with
   `--check --diff` on a PR, for real on a push once approved.
   `kustomize-validate` renders each Kustomize component of a GitOps repo as

@@ -1,0 +1,77 @@
+# Reusable: fail a PR that changes a Claude Code plugin without bumping its
+# version. A session gets a new copy of a plugin only when its version
+# changes, so a change without a bump never reaches the sessions that
+# auto-update it. A PR that changes no plugin passes.
+name: plugin-version
+
+on:
+  workflow_call:
+    inputs:
+      plugins:
+        description: Directory holding one directory per plugin, relative to the repo root.
+        type: string
+        default: plugins
+      marketplace:
+        description: The marketplace file, relative to the repo root.
+        type: string
+        default: .claude-plugin/marketplace.json
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # The version is read from plugin.json, at the base and at the head.
+      # Claude Code takes plugin.json's over the marketplace entry's without
+      # warning, so an entry that declares one must agree with it.
+      - name: versions
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PLUGINS: ${{ inputs.plugins }}
+          MARKETPLACE: ${{ inputs.marketplace }}
+        run: |
+          if [ -z "$BASE" ]; then
+            echo "Not a pull request: nothing to compare."; exit 0
+          fi
+          PLUGINS="${PLUGINS%/}"
+          # Without renames, a file moved between plugins changes both.
+          names=""
+          while IFS= read -r f; do
+            rest="${f#"$PLUGINS"/}"
+            case "$rest" in */*) names="$names${rest%%/*}"$'\n' ;; esac
+          done <<< "$(git diff --name-only --no-renames "$BASE...HEAD" -- "$PLUGINS")"
+          names="$(printf '%s' "$names" | sort -u)"
+          if [ -z "$names" ]; then
+            echo "No plugin changed."; exit 0
+          fi
+          status=0
+          while IFS= read -r name; do
+            dir="$PLUGINS/$name"
+            manifest="$dir/.claude-plugin/plugin.json"
+            if [ ! -d "$dir" ]; then
+              echo "$name: removed."; continue
+            fi
+            base="$(git show "$BASE:$manifest" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
+            head="$(jq -r '.version // empty' "$manifest" 2>/dev/null || true)"
+            if [ -z "$head" ] || [ "$head" = "$base" ]; then
+              echo "::error file=$manifest::$name changed, version ${base:-none} at the base and ${head:-none} at the head. Give it a new version in $manifest."
+              status=1
+            else
+              echo "$name: ${base:-new} -> $head."
+            fi
+            [ -f "$MARKETPLACE" ] || continue
+            if ! listed="$(jq -r --arg n "$name" '.plugins[]? | select(.name == $n) | .version // empty' "$MARKETPLACE")"; then
+              echo "::error file=$MARKETPLACE::$MARKETPLACE is not valid JSON."
+              status=1
+            elif [ -n "$listed" ] && [ "$listed" != "$head" ]; then
+              echo "::error file=$MARKETPLACE::$name is ${listed} in $MARKETPLACE but ${head:-none} in $manifest, and Claude Code uses plugin.json's without warning. Drop the entry's version, or make them equal."
+              status=1
+            fi
+          done <<< "$names"
+          exit $status
