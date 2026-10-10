@@ -1,0 +1,14 @@
+{
+  "$schema": "https://code.claude.com/schemas/settings.json",
+  "enabledPlugins": {
+    "0xc0@0xc0-labs": true
+  },
+  "extraKnownMarketplaces": {
+    "0xc0-labs": {
+      "source": {
+        "source": "github",
+        "repo": "0xc0-labs/claude-config"
+      }
+    }
+  }
+}
