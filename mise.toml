@@ -11,3 +11,8 @@ terraform-docs = "0.24.0"
 [tasks.docs]
 description = "Regenerate the inputs/outputs section of every module README"
 run = 'for m in modules/*/; do terraform-docs markdown table --output-file README.md --output-mode inject "$m"; done'
+
+[settings]
+# Installs only what mise.lock records, every download checked against its
+# checksum, for this machine's platform. After any change above, `mise lock`.
+locked = true
