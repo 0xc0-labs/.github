@@ -19,6 +19,7 @@ mise.toml                  pinned tool versions
   pr-issue.yml             reusable: fail a PR that links no issue
   packer.yml               reusable: validate Packer templates; rebuild the affected ones, a job per chain, once approved
   hook-tests.yml           reusable: run a repo's hook test cases
+  plugin-version.yml       reusable: fail a PR that changes a Claude Code plugin without bumping its version
   ansible.yml              reusable: the affected playbooks, in parallel; --check on a PR; for real, once approved
   kustomize-validate.yml   reusable: render each Kustomize component as Argo CD does, and validate it
   node-check.yml           reusable: lint, type-check and build a Node app with its mise toolchain
