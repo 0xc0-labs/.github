@@ -33,7 +33,8 @@ into the workspace repo at exactly the path GitHub reads.
   `--check --diff` on a PR, for real on a push once approved.
   `kustomize-validate` renders each Kustomize component of a GitOps repo as
   Argo CD does, and validates it; `pin-check` checks that each environment's
-  `APP_VERSION` is its image's `newTag`. `node-check` lints, type-checks and
+  `APP_VERSION` is its image's `newTag`, and fails a PR of the org's Apps
+  that changes anything but one environment's pin. `node-check` lints, type-checks and
   builds a Node app; `container-image` builds an app's image and, on `main`,
   pushes it to GHCR (`sha-<7>` and `main`, never `latest`): with Buildx on
   GitHub's runners, with rootless BuildKit on the self-hosted ones. The

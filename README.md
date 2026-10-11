@@ -168,6 +168,18 @@ committed, with no install and no lifecycle scripts; its JWT role in the
 entry for `ghcr.io/0xc0-labs/<repo>` and `APP_VERSION` in a `release`
 ConfigMap. `gitops`' `pin-check` keeps those two equal.
 
+`pin-check` also keeps the org's bots to pins. A PR opened by
+`0xc0-labs-promoter[bot]` or `0xc0-labs-renovate[bot]` fails it when it
+changes anything but one environment's pin: the application's image
+`newTag` and `digest`, and `APP_VERSION`, in a single
+`apps/<app>/<env>/kustomization.yaml`. Any other file, or any other line of
+that file, fails, named in the error. A human's PR is not limited. The check
+reads the PR's author from the event and its diff from the API, before
+anything from the PR's branch is checked out, and runs from `.github@main`:
+the PR cannot change the rule it is checked by. Once `pin / check` is
+required in `gitops`, a staging promotion that reaches past its pin cannot
+merge itself.
+
 ```yaml
 # .github/workflows/ci.yml, of a private application
 on:
