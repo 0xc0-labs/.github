@@ -42,7 +42,8 @@ into the workspace repo at exactly the path GitHub reads.
   delivery: `release-candidate`, on every push to `main`, tags the next rc
   on the commit and on the image's digest, and opens staging's PR in
   `gitops`, which merges itself; `release`, run by hand, makes the rc staging
-  runs a release and opens prod's PR, the operator's to merge. Both sign as
+  runs a release, or the rc it is given, and opens prod's PR, the operator's
+  to merge. Both sign as
   the `0xc0-labs-promoter` App through Vault's Transit. `pr-issue` fails a
   PR that links no issue, unless one of the org's Apps opened it; `issue`
   runs it for this repo. A reusable workflow that needs the network, or that
