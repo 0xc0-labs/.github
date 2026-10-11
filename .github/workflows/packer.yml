@@ -1,8 +1,10 @@
 # Reusable: validate Packer templates on a PR; on a push to main, once
 # approved, rebuild the affected ones and every template cloning them. VMs are
 # full clones: none changes until it is rebuilt with its `rebuild` counter.
-# The caller provides scripts/delete-template <name> and
-# scripts/packer <name> <args>.
+# The caller provides scripts/packer <name> <args>. Its build goes to
+# <name>-next, at the template's VMID + 50, and replaces the old template
+# only once it has succeeded: a build that fails or is cut leaves the old one
+# where it was.
 name: packer
 
 on:
@@ -119,7 +121,7 @@ jobs:
               "$ROLES_DIR"/*/*)
                 role="${f#"$ROLES_DIR"/}"; role="${role%%/*}"
                 for t in "${order[@]}"; do
-                  if grep -Eq "^[[:space:]-]*(role|name):[[:space:]]*[\"']?$role[\"']?[[:space:]]*$" "$TEMPLATES_DIR/$t/playbook.yml"; then hit["$t"]=1; fi
+                  if grep -Eq "^[[:space:]-]*(role|name):[[:space:]]*[\"']?${role}[\"']?[[:space:]]*$" "$TEMPLATES_DIR/$t/playbook.yml"; then hit["$t"]=1; fi
                 done ;;
               *) all=1 ;;
             esac
@@ -175,6 +177,30 @@ jobs:
         with:
           install_args: ${{ inputs.tools }}
 
+      # Packer's plugins live in GitHub's cache between builds: the runner's
+      # home is emptied around every job, and without it each build would
+      # download them again from GitHub's releases. They go under RUNNER_TEMP,
+      # which the runner empties too. The key is the templates'
+      # required_plugins blocks alone, braces counted, so a bump changes it
+      # by itself and any other edit keeps it.
+      - name: plugins key
+        id: plugins-key
+        env:
+          TEMPLATES_DIR: ${{ inputs.templates-dir }}
+        run: |
+          echo "PACKER_PLUGIN_PATH=$RUNNER_TEMP/packer-plugins" >> "$GITHUB_ENV"
+          hash=$(awk '/required_plugins[[:space:]]*\{/ { on = 1; depth = 0 }
+                      on { print; depth += gsub(/\{/, "{") - gsub(/\}/, "}"); if (depth == 0) on = 0 }' \
+                   "$TEMPLATES_DIR"/*/*.pkr.hcl | sha256sum | cut -d' ' -f1)
+          echo "key=packer-plugins-$RUNNER_OS-$RUNNER_ARCH-$hash" >> "$GITHUB_OUTPUT"
+
+      - name: plugins
+        id: plugins
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/packer-plugins
+          key: ${{ steps.plugins-key.outputs.key }}
+
       # JWT login with the job's OIDC token: no Vault credential is stored.
       - name: vault
         if: inputs.vault-addr != ''
@@ -194,14 +220,38 @@ jobs:
         run: |
           if [ -n "${PROXMOX_VE_API_TOKEN:-}" ]; then echo "::add-mask::${PROXMOX_VE_API_TOKEN#*=}"; fi
 
-      # Proxmox never overwrites a template: the old one is deleted first.
-      - name: build
+      # Every template of the chain, before any is built. A transient error
+      # from GitHub's releases must not fail the build: each init is tried up
+      # to three times, 15 s and then 45 s apart, and fails after the last.
+      - name: init
         run: |
           # Not while-read: a command reading stdin would eat the list.
           for name in $TEMPLATES; do
+            for pause in 15 45 last; do
+              if scripts/packer "$name" init; then break; fi
+              if [ "$pause" = last ]; then
+                echo "::error::packer init of $name failed three times."
+                exit 1
+              fi
+              echo "::warning::packer init of $name failed; trying again in ${pause}s."
+              sleep "$pause"
+            done
+          done
+
+      # Saved as soon as init has them, whatever the build does next.
+      - name: save plugins
+        if: steps.plugins.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/packer-plugins
+          key: ${{ steps.plugins-key.outputs.key }}
+
+      # Each template is built beside the old one, as <name>-next at its VMID
+      # + 50, and replaces it only once the build has succeeded.
+      - name: build
+        run: |
+          for name in $TEMPLATES; do
             echo "::group::$name"
-            scripts/delete-template "$name"
-            scripts/packer "$name" init
             scripts/packer "$name" build -color=false -var "commit=${GITHUB_SHA::12}"
             echo "::endgroup::"
           done
