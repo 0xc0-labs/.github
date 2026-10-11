@@ -1,0 +1,312 @@
+# Reusable: cut an application's next release candidate on a push to main,
+# after its image job, and offer it to staging: a PR in gitops that changes
+# only staging's pin, and merges itself once gitops' checks pass. The image is
+# never rebuilt: the rc tags the digest main's build pushed as sha-<7>.
+#
+# The version comes from the Conventional Commits since the last release
+# (git-cliff, with the caller's cliff.toml): vX.Y.Z-rc.N, N one past the last
+# rc of X.Y.Z. A rerun on a commit that has its rc already reuses it.
+#
+# git-cliff and crane come from the caller's mise.toml, node too when it
+# publishes a package; yq from gitops' own. The job logs in to Vault, only to
+# sign as the 0xc0-labs-promoter App: Vault's role for the caller's repo is
+# bound to main and to this workflow and release.yml (release*.yml).
+name: release-candidate
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: The application's folder in gitops, apps/<app>/.
+        type: string
+        required: true
+      npm-package:
+        description: >-
+          Directory of an npm package to publish to GitHub Packages with the
+          rc's version, under the rc dist-tag. It is published as committed:
+          no install, no lifecycle scripts. Empty, nothing is published.
+        type: string
+        default: ""
+      runs-on:
+        description: >-
+          Where the job runs, as JSON. The self-hosted runners by default:
+          Vault is reached only from inside the network.
+        type: string
+        default: '{"group": "0xc0", "labels": "0xc0"}'
+
+env:
+  VAULT_ADDR: https://vault.int.0xc0.cc
+  # Whatever the caller's cliff.toml says: only a release is the previous
+  # version, never an rc; the first one is 0.1.0; while in 0.x, a breaking
+  # change bumps the minor.
+  GIT_CLIFF__GIT__TAG_PATTERN: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+  GIT_CLIFF__BUMP__INITIAL_TAG: v0.1.0
+  GIT_CLIFF__BUMP__BREAKING_ALWAYS_BUMP_MAJOR: "false"
+
+jobs:
+  rc:
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    permissions:
+      contents: write # the rc's tag
+      packages: write # the image's tag and the npm package
+      id-token: write # the Vault login
+    # One rc at a time per repo, in order. A newer push replaces one still
+    # waiting: its own rc includes that commit.
+    concurrency:
+      group: release-candidate-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      APP: ${{ inputs.app }}
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: git-cliff crane${{ inputs.npm-package != '' && ' node' || '' }}
+
+      - name: version
+        id: version
+        run: |
+          tag=$(git tag --points-at HEAD --list 'v*-rc.*' --sort=-v:refname | head -n1)
+          if [ -n "$tag" ]; then
+            echo "This commit is $tag already."
+          else
+            next=$(git cliff --bumped-version)
+            next="v${next#v}"
+            if ! [[ "$next" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || git rev-parse -q --verify "refs/tags/$next" > /dev/null; then
+              echo "::error::git-cliff gave '$next', not a version that has no release yet."
+              exit 1
+            fi
+            last=$(git tag --list "$next-rc.*" | sed 's/.*-rc\.//' | grep -E '^[0-9]+$' | sort -n | tail -n1)
+            tag="$next-rc.$(( ${last:-0} + 1 ))"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: GHCR credentials, for this job alone
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/docker" >> "$GITHUB_ENV"
+          mkdir -m 0700 "$RUNNER_TEMP/docker"
+          auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/docker/config.json"
+
+      # The commit and the image take the same name; the image keeps its
+      # digest.
+      - name: tag
+        id: tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          digest=$(crane digest "$IMAGE:sha-${GITHUB_SHA::7}")
+          git rev-parse -q --verify "refs/tags/$TAG" > /dev/null || git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          crane tag "$IMAGE@$digest" "$TAG"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release candidate"
+            echo
+            echo "\`$TAG\`: \`$IMAGE@$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: npm package
+        if: inputs.npm-package != ''
+        working-directory: ${{ inputs.npm-package }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          name=$(node -p 'require("./package.json").name')
+          # npm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
+          # shellcheck disable=SC2016
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
+          if npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "$name@$version is published already."
+            exit 0
+          fi
+          npm pkg set "version=$version"
+          npm publish --tag rc --ignore-scripts
+
+      - name: vault
+        id: vault
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ env.VAULT_ADDR }}
+          method: jwt
+          path: jwt
+          role: ${{ github.event.repository.name }}
+          jwtGithubAudience: ${{ env.VAULT_ADDR }}
+          exportEnv: false
+          outputToken: true
+          secrets: |
+            ci/data/shared/github-promoter-app app_id | APP_ID ;
+            ci/data/shared/github-promoter-app installation_id | INSTALLATION_ID ;
+
+      # The runners' pattern (infrastructure, github-runner-jit): Transit signs
+      # the App's JWT, and the key never leaves Vault. The token it buys is
+      # narrowed to gitops, contents and pull requests.
+      - name: promoter token
+        id: promoter
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VAULT_TOKEN: ${{ steps.vault.outputs.vault_token }}
+          APP_ID: ${{ steps.vault.outputs.APP_ID }}
+          INSTALLATION_ID: ${{ steps.vault.outputs.INSTALLATION_ID }}
+        with:
+          script: |
+            const { VAULT_ADDR, VAULT_TOKEN, APP_ID, INSTALLATION_ID } = process.env;
+            const call = async (url, init) => {
+              const res = await fetch(url, init);
+              if (!res.ok) throw new Error(`${init.method} ${url}: ${res.status} ${await res.text()}`);
+              return res.json();
+            };
+            const b64url = (s) => Buffer.from(s).toString('base64url');
+            const now = Math.floor(Date.now() / 1000);
+            const unsigned = [
+              b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })),
+              b64url(JSON.stringify({ iat: now - 60, exp: now + 540, iss: APP_ID })),
+            ].join('.');
+            // PKCS#1 v1.5 over SHA-256 is RS256. Transit answers
+            // vault:v<n>:<base64>; the JWT takes the same bytes as base64url.
+            const signed = await call(`${VAULT_ADDR}/v1/transit/sign/github-promoter-app/sha2-256`, {
+              method: 'POST',
+              headers: { 'X-Vault-Token': VAULT_TOKEN },
+              body: JSON.stringify({ input: Buffer.from(unsigned).toString('base64'), signature_algorithm: 'pkcs1v15' }),
+            });
+            const signature = Buffer.from(signed.data.signature.split(':')[2], 'base64').toString('base64url');
+            const { token } = await call(`https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${unsigned}.${signature}`,
+                Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+              body: JSON.stringify({ repositories: ['gitops'], permissions: { contents: 'write', pull_requests: 'write' } }),
+            });
+            core.setSecret(token);
+            core.setOutput('token', token);
+
+      - name: gitops
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/gitops
+          path: _gitops
+          token: ${{ steps.promoter.outputs.token }}
+          persist-credentials: false
+
+      # yq rewrites the values; only those changes reach the file, through a
+      # patch that ignores the blank lines yq drops.
+      - name: pin
+        id: pin
+        working-directory: _gitops
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          DIGEST: ${{ steps.tag.outputs.digest }}
+        run: |
+          pin="apps/$APP/staging/kustomization.yaml"
+          [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
+          mise trust --quiet
+          mise install yq
+          yq() { mise exec yq -- yq "$@"; }
+          yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
+            { echo "::error file=$pin::No images entry named $IMAGE."; exit 1; }
+          yq -e '.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))' "$pin" > /dev/null ||
+            { echo "::error file=$pin::No APP_VERSION in the release ConfigMap."; exit 1; }
+          yq '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST)) |
+              (.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' \
+            "$pin" > "$RUNNER_TEMP/pin.yaml"
+          diff -B -U0 --label "$pin" --label "$pin" "$pin" "$RUNNER_TEMP/pin.yaml" > "$RUNNER_TEMP/pin.diff" || true
+          if [ ! -s "$RUNNER_TEMP/pin.diff" ]; then
+            echo "Staging is pinned to $VERSION already."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git apply -p0 --unidiff-zero "$RUNNER_TEMP/pin.diff"
+          git diff
+          {
+            echo "changed=true"
+            echo "path=$pin"
+            echo "base=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      # The commit goes through the API, so GitHub signs it as the App's.
+      # Older promotions of staging still open are superseded by this one.
+      - name: promotion PR
+        if: steps.pin.outputs.changed == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ENVIRONMENT: staging
+          VERSION: ${{ steps.version.outputs.tag }}
+          DIGEST: ${{ steps.tag.outputs.digest }}
+          PIN: ${{ steps.pin.outputs.path }}
+          BASE: ${{ steps.pin.outputs.base }}
+          TITLE: "chore(${{ inputs.app }}): promote ${{ steps.version.outputs.tag }} to staging"
+          LINK: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}
+          AUTO_MERGE: "true"
+        with:
+          github-token: ${{ steps.promoter.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const { APP, IMAGE, ENVIRONMENT, VERSION, DIGEST, PIN, BASE, TITLE, LINK, AUTO_MERGE } = process.env;
+            const owner = context.repo.owner;
+            const repo = 'gitops';
+            const prefix = `chore/promote-${APP}-${ENVIRONMENT}-`;
+            const branch = `${prefix}${VERSION}`;
+
+            try {
+              await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: BASE });
+            } catch (e) {
+              if (e.status !== 422) throw e;
+              await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: BASE, force: true });
+            }
+            await github.graphql(
+              `mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }`,
+              { input: {
+                branch: { repositoryNameWithOwner: `${owner}/${repo}`, branchName: branch },
+                message: { headline: TITLE },
+                expectedHeadOid: BASE,
+                fileChanges: { additions: [{ path: PIN, contents: fs.readFileSync(`_gitops/${PIN}`).toString('base64') }] },
+              } },
+            );
+
+            const body = [
+              `\`${APP}\` in ${ENVIRONMENT}: \`${VERSION}\`.`,
+              '',
+              `- Version: \`${VERSION}\``,
+              `- Digest: \`${DIGEST}\`, of \`${IMAGE}\``,
+              `- Tag: ${LINK}`,
+              '',
+              'It merges itself once its checks pass.',
+            ].join('\n');
+            const [open] = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', head: `${owner}:${branch}` });
+            const pr = open ?? (await github.rest.pulls.create({ owner, repo, base: 'main', head: branch, title: TITLE, body })).data;
+            core.notice(`${TITLE}: ${pr.html_url}`);
+
+            const others = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base: 'main' });
+            for (const old of others) {
+              if (old.number === pr.number || old.user.login !== pr.user.login || !old.head.ref.startsWith(prefix)) continue;
+              await github.rest.issues.createComment({ owner, repo, issue_number: old.number, body: `Superseded by #${pr.number}.` });
+              await github.rest.pulls.update({ owner, repo, pull_number: old.number, state: 'closed' });
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/${old.head.ref}` });
+            }
+
+            if (AUTO_MERGE === 'true') {
+              try {
+                await github.graphql(
+                  `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }`,
+                  { id: pr.node_id },
+                );
+              } catch (e) {
+                // GitHub refuses auto-merge on a PR with nothing left to wait
+                // for: merge it now.
+                if (!/clean status/i.test(e.message)) throw e;
+                await github.rest.pulls.merge({ owner, repo, pull_number: pr.number, merge_method: 'squash' });
+              }
+            }

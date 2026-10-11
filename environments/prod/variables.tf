@@ -45,6 +45,8 @@ variable "repositories" {
     # Only checks that report on every PR, once they have run: one that never
     # reports blocks every PR.
     required_checks = optional(list(string), [])
+    # A PR may be set to merge itself once its required checks pass.
+    allow_auto_merge = optional(bool, false)
   }))
 
   validation {

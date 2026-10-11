@@ -28,6 +28,8 @@ repositories = {
     description     = "ArgoCD manifests for the cluster"
     topics          = ["argocd", "0xc0"]
     required_checks = ["issue / check"]
+    # Staging's promotion PRs merge themselves; prod's never do.
+    allow_auto_merge = true
   }
   "vault" = {
     description            = "OpenTofu configuration of the cluster's Vault"
@@ -56,14 +58,19 @@ repositories = {
   }
 }
 
-# Only the repos whose CI needs the network.
+# The repos whose CI needs the network, and the private applications, whose
+# whole CI runs here: their checks, their image, their rc and their release.
 runner_group = {
   name         = "0xc0"
-  repositories = [".github", "infrastructure", "vault"]
+  repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com"]
   workflows = [
     "0xc0-labs/.github/.github/workflows/ansible.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/packer.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/tofu-plan.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/tofu-apply.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/node-check.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/container-image.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/release-candidate.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/release.yml@refs/heads/main",
   ]
 }

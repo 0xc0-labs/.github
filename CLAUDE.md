@@ -32,11 +32,19 @@ into the workspace repo at exactly the path GitHub reads.
   playbooks the change affects, each in its own job, in parallel: with
   `--check --diff` on a PR, for real on a push once approved.
   `kustomize-validate` renders each Kustomize component of a GitOps repo as
-  Argo CD does, and validates it. `node-check` lints, type-checks and builds
-  a Node app; `container-image` builds an app's image and, on `main`, pushes
-  it to GHCR (`sha-<7>` and `main`, never `latest`). `pr-issue` fails a PR
-  that links no issue; `issue` runs it for this repo. A reusable workflow that
-  needs the network is listed in the runner group's `workflows`.
+  Argo CD does, and validates it; `pin-check` checks that each environment's
+  `APP_VERSION` is its image's `newTag`. `node-check` lints, type-checks and
+  builds a Node app; `container-image` builds an app's image and, on `main`,
+  pushes it to GHCR (`sha-<7>` and `main`, never `latest`): with Buildx on
+  GitHub's runners, with rootless BuildKit on the self-hosted ones. The
+  delivery: `release-candidate`, on every push to `main`, tags the next rc
+  on the commit and on the image's digest, and opens staging's PR in
+  `gitops`, which merges itself; `release`, run by hand, makes the rc staging
+  runs a release and opens prod's PR, the operator's to merge. Both sign as
+  the `0xc0-labs-promoter` App through Vault's Transit. `pr-issue` fails a
+  PR that links no issue, unless one of the org's Apps opened it; `issue`
+  runs it for this repo. A reusable workflow that needs the network, or that
+  a private application runs, is listed in the runner group's `workflows`.
 
 Layout and naming conventions are in `README.md`, section Conventions. The
 bootstrap order is there too. Do not improvise it: the org's first apply runs
@@ -54,9 +62,11 @@ neither is drift:
   enabled, so an application's image can be pulled by the cluster with no
   secret (operator decision, 2026-10-02).
 - **Each package's visibility.** A package is always created private on its
-  first push. After an application's first push to `main`, the operator makes
-  it public from its Package settings, before gitops deploys it. A public
-  package cannot go private again.
+  first push. After a public application's first push to `main`, the operator
+  makes it public from its Package settings, before gitops deploys it. A
+  public package cannot go private again. A private application's image stays
+  private: the cluster pulls it with the read-only token at
+  `apps/shared/ghcr-pull` in Vault.
 
 ## Visibility
 
@@ -74,8 +84,8 @@ readable by anyone. No secret value ever goes in here — only references.
   one PR, one intent.
 - `infrastructure` and `.github`: `main` only, PR required, apply behind manual
   approval.
-- Applications: a test environment only where the app needs one; then
-  test→prod promotes the same digest, never a rebuild.
+- Applications: staging only where the app needs one; then staging→prod
+  promotes the same digest, never a rebuild.
 - No organization secret in cleartext in the code. Reference it, never the value.
 - The self-hosted runners live on the two CI VMs, `vm-ci-01` (10.10.1.10) and
   `vm-ci-02` (10.10.1.20), ephemeral, two on each. Do not register others.

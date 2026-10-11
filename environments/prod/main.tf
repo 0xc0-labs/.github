@@ -7,6 +7,7 @@ module "repositories" {
   topics              = each.value.topics
   visibility          = each.value.visibility
   auto_init           = each.value.auto_init
+  allow_auto_merge    = each.value.allow_auto_merge
   ruleset_enforcement = var.bootstrap || each.value.bootstrap ? "disabled" : "active"
 
   required_status_checks = each.value.required_checks

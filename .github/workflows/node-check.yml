@@ -8,13 +8,22 @@ on:
         description: Directory of the app's package.json, relative to the repo root.
         type: string
         default: .
+      runs-on:
+        description: >-
+          Where the job runs, as JSON. GitHub's runners by default, for a
+          public repo; '{"group": "0xc0", "labels": "0xc0"}' for the
+          self-hosted runners, which a private application runs on, once
+          the runner group admits its repo. A PR from a fork always runs on
+          "ubuntu-latest", never on the self-hosted ones.
+        type: string
+        default: '"ubuntu-latest"'
 
 permissions:
   contents: read
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}

@@ -1,0 +1,56 @@
+# Reusable: check every environment's pin in a GitOps repo. Where a
+# kustomization.yaml generates the `release` ConfigMap, its APP_VERSION must
+# equal the newTag of the application's image, the one images entry under
+# ghcr.io/<owner>/: the version a service reports is the one it runs.
+#
+# Not named release*: that glob is the Vault role the release jobs log in
+# with, and this one logs in nowhere.
+name: pin-check
+
+on:
+  workflow_call:
+    inputs:
+      pins:
+        description: Glob of the kustomization.yaml files to check, relative to the repo root.
+        type: string
+        default: apps/*/*/kustomization.yaml
+      tools:
+        description: mise tools to install, pinned in the caller's mise.toml.
+        type: string
+        default: yq
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      PINS: ${{ inputs.pins }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: ${{ inputs.tools }}
+
+      - name: pins
+        run: |
+          status=0
+          for pin in $PINS; do
+            [ -f "$pin" ] || continue
+            version=$(yq '[.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION=")) | sub("^APP_VERSION="; "")] | .[0] // ""' "$pin")
+            [ -n "$version" ] || continue
+            read -r count tag < <(yq '[.images[] | select(.name | test("^ghcr\\.io/" + strenv(OWNER) + "/"))] | [length, (.[0].newTag // "")] | join(" ")' "$pin")
+            if [ "$count" != 1 ]; then
+              echo "::error file=$pin::APP_VERSION is $version, and $count images are under ghcr.io/$OWNER/: the application's must be the only one."
+              status=1
+            elif [ "$tag" != "$version" ]; then
+              echo "::error file=$pin::APP_VERSION is $version, but the image's newTag is ${tag:-unset}."
+              status=1
+            else
+              echo "$pin: $version"
+            fi
+          done
+          exit $status
