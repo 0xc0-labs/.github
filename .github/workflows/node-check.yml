@@ -1,4 +1,9 @@
 # Reusable: lint, type-check and build a Node app with its own mise toolchain.
+# From the caller's mise.toml it installs only what its steps run, node and
+# pnpm, at the versions there, checked against its mise.lock. The tools a repo
+# declares for people (a language server, Claude Code's plugins, a local
+# object store) are not downloaded. `tools` adds names to that list; none of
+# today's callers needs it.
 name: node-check
 
 on:
@@ -17,6 +22,12 @@ on:
           "ubuntu-latest", never on the self-hosted ones.
         type: string
         default: '"ubuntu-latest"'
+      tools:
+        description: >-
+          mise tools to install besides node and pnpm, space-separated,
+          pinned in the caller's mise.toml.
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,6 +44,7 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           working_directory: ${{ inputs.working-directory }}
+          install_args: node pnpm${{ inputs.tools != '' && format(' {0}', inputs.tools) || '' }}
 
       - name: install
         run: pnpm install --frozen-lockfile
