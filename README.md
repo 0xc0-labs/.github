@@ -16,14 +16,17 @@ mise.toml                  pinned tool versions
 .github/workflows/
   tofu-plan.yml            reusable: fmt, validate, plan, comment on the PR
   tofu-apply.yml           reusable: apply inside an approval-gated environment
-  pr-issue.yml             reusable: fail a PR that links no issue
+  pr-issue.yml             reusable: fail a PR that links no issue, unless one of the org's Apps opened it
   packer.yml               reusable: validate Packer templates; rebuild the affected ones, a job per chain, once approved
   hook-tests.yml           reusable: run a repo's hook test cases
   plugin-version.yml       reusable: fail a PR that changes a Claude Code plugin without bumping its version
   ansible.yml              reusable: the affected playbooks, in parallel; --check on a PR; for real, once approved
   kustomize-validate.yml   reusable: render each Kustomize component as Argo CD does, and validate it
+  pin-check.yml            reusable: each environment's APP_VERSION is its image's newTag
   node-check.yml           reusable: lint, type-check and build a Node app with its mise toolchain
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
+  release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
+  release.yml              reusable: by hand, release the rc staging runs and open prod's PR in gitops
   org-plan.yml             this repo: plan environments/prod on every PR
   org-apply.yml            this repo: apply it after merge, once approved
   issue.yml                this repo: run pr-issue on every PR
@@ -107,20 +110,78 @@ A repo whose applies run from CI needs `production_environment = true` in
 `environments/prod/terraform.tfvars`: that creates the approval-gated
 environment the apply workflow waits on.
 
-An application repo checks its code and builds its image on GitHub's runners,
-with no Vault and no secret: `container-image` pushes to GHCR with the job's
-own `GITHUB_TOKEN`, only from `main`. Trunk-based, so every commit there is a
-deployable image, tagged `sha-<7>` and `main`; gitops pins the digest from the
-job's summary.
+### Application repos
 
-GHCR creates every package private, and only the web UI can change that, so
-a new application takes one manual step. After the first push to `main`, the
-operator opens the package (github.com/orgs/0xc0-labs/packages), goes to
-Package settings and picks Change visibility → Public. Only then does gitops
-pin its digest: until it is public the cluster cannot pull the image, and the
-route answers 503. Later images of the same package are public already.
+An application checks its code with `node-check` and builds its image with
+`container-image`, which pushes to GHCR with the job's own `GITHUB_TOKEN`,
+only from `main`. Trunk-based, so every commit there is a deployable image,
+tagged `sha-<7>` and `main`. The image carries its commit: the build passes
+`APP_COMMIT`, which the Dockerfile turns into an `ENV`.
+
+Where they run depends on the repo:
+
+- **A public repo** (`offby1.cc`) runs both on GitHub's runners, the
+  default, with no Vault and no secret. Its build caches in GitHub's cache.
+- **A private repo** (`payload`, `artistlabco.com`) runs its whole CI on
+  the self-hosted runners: `runs-on: '{"group": "0xc0", "labels": "0xc0"}'`,
+  and its repo in `runner_group.repositories`. The image is built by the
+  instance's rootless BuildKit, which starts empty for every job, so the
+  layer cache lives in GHCR beside the image (`:buildcache`), written by
+  `main`'s builds alone. Only its rc and release jobs log in to Vault; its
+  checks and its image never get `id-token: write`.
+
+Either way the build carries a `mode=max` provenance and an SBOM, from a
+scanner image pinned by digest.
+
+The delivery, for an application with staging (`gitops`' `apps/<app>/staging/`
+and `apps/<app>/prod/`, each with its pin):
+
+1. **Every push to `main`**, after the image, `release-candidate` cuts
+   `vX.Y.Z-rc.N`: the version `git-cliff` computes from the Conventional
+   Commits since the last release (`feat` a minor, `fix` a patch, `!` a
+   major, a minor while in 0.x; the first is 0.1.0), N one past the last rc of
+   that version. It tags the commit and the image's digest with it, never
+   rebuilding the image, and publishes the npm package, when there is one,
+   as `X.Y.Z-rc.N` under the `rc` dist-tag. Then it opens a PR in `gitops`
+   that changes only staging's pin, closes the older staging PRs still open,
+   and sets it to merge itself once its checks pass.
+2. **A release** is `release`, run by hand (`workflow_dispatch`). It reads
+   staging's pin on `gitops`' `main`, checks that the rc's tag names the
+   pinned digest, and makes `vX.Y.Z` of it: a tag on the same commit, a
+   GitHub Release with `git-cliff`'s changelog since the last release, the
+   same digest tagged `vX.Y.Z`, and the package as `X.Y.Z`. It fails if that
+   release exists. Then it opens prod's PR in `gitops`, which never merges
+   itself: merging it is prod's approval. Rolling back is reverting it.
+
+Both PRs are opened by the `0xc0-labs-promoter` App, whose key never leaves
+Vault: the job logs in with the JWT role named after its repo (bound to
+`main` and to `release*.yml`), reads `ci/shared/github-promoter-app`, has
+Transit sign the App's JWT, and exchanges it for a token narrowed to
+`gitops`, contents and pull requests. The `issue` check lets the App's PRs
+through with no linked issue. A pin edit keeps the rest of the file as it is:
+`yq` sets the values, and only those lines change.
+
+What an application brings: a `cliff.toml`; `git-cliff` and `crane` in its
+`mise.toml`, and `node` when it publishes a package, which goes out as
+committed, with no install and no lifecycle scripts; its JWT role in the
+`vault` repo; its repo in the runner group; and `gitops`' pins, an `images:`
+entry for `ghcr.io/0xc0-labs/<repo>` and `APP_VERSION` in a `release`
+ConfigMap. `gitops`' `pin-check` keeps those two equal.
+
+`pin-check` also keeps the org's bots to pins. A PR opened by
+`0xc0-labs-promoter[bot]` or `0xc0-labs-renovate[bot]` fails it when it
+changes anything but one environment's pin: the application's image
+`newTag` and `digest`, and `APP_VERSION`, in a single
+`apps/<app>/<env>/kustomization.yaml`. Any other file, or any other line of
+that file, fails, named in the error. A human's PR is not limited. The check
+reads the PR's author from the event and its diff from the API, before
+anything from the PR's branch is checked out, and runs from `.github@main`:
+the PR cannot change the rule it is checked by. Once `pin / check` is
+required in `gitops`, a staging promotion that reaches past its pin cannot
+merge itself.
 
 ```yaml
+# .github/workflows/ci.yml, of a private application
 on:
   pull_request:
   push:
@@ -128,15 +189,61 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   check:
     uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
+    with:
+      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
   image:
     needs: check
+    permissions:
+      contents: read
+      packages: write
     uses: 0xc0-labs/.github/.github/workflows/container-image.yml@main
+    with:
+      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
+  rc:
+    needs: image
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: 0xc0-labs/.github/.github/workflows/release-candidate.yml@main
+    with:
+      app: payload
+      npm-package: packages/payload-types
 ```
+
+```yaml
+# .github/workflows/release.yml
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: 0xc0-labs/.github/.github/workflows/release.yml@main
+    with:
+      app: payload
+      npm-package: packages/payload-types
+```
+
+GHCR creates every package private, and only the web UI can change that, so
+a new public application takes one manual step. After the first push to
+`main`, the operator opens the package (github.com/orgs/0xc0-labs/packages),
+goes to Package settings and picks Change visibility → Public. Only then
+does gitops pin its digest: until it is public the cluster cannot pull the
+image, and the route answers 503. Later images of the same package are
+public already. A private application's image stays private: the cluster
+pulls it with the read-only token at `apps/shared/ghcr-pull` in Vault.
 
 ## Bootstrap
 

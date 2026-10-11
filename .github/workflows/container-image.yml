@@ -1,6 +1,11 @@
 # Reusable: build a repo's image; on main, push it to GHCR. Trunk-based: every
 # commit on main is a deployable image, tagged sha-<7> and main, never latest.
 # GHCR takes the job's GITHUB_TOKEN; no secret is involved.
+#
+# On GitHub's runners it builds with Buildx. The self-hosted runners have no
+# Docker: there it builds with the instance's rootless BuildKit, through
+# buildctl (infrastructure, ansible/roles/github_runner/README.md). Every
+# build there starts cold, so its layer cache lives in GHCR, beside the image.
 name: container-image
 
 on:
@@ -15,23 +20,47 @@ on:
         type: string
         default: Dockerfile
       platforms:
-        description: Target platforms, comma separated.
+        description: Target platforms, comma separated. The self-hosted runners build their own, linux/amd64, alone.
         type: string
         default: linux/amd64
+      runs-on:
+        description: >-
+          Where the job runs, as JSON. GitHub's runners by default, for a
+          public repo; '{"group": "0xc0", "labels": "0xc0"}' for the
+          self-hosted runners, which a private application runs on, once
+          the runner group admits its repo. A PR from a fork always runs on
+          "ubuntu-latest", never on the self-hosted ones.
+        type: string
+        default: '"ubuntu-latest"'
+    outputs:
+      image:
+        description: The image's name, with no tag.
+        value: ${{ jobs.image.outputs.image }}
+      digest:
+        description: The digest of the image built. It is pushed on main only.
+        value: ${{ jobs.image.outputs.digest }}
 
 permissions:
   contents: read
   packages: write
 
+env:
+  # BuildKit pulls the SBOM scanner as it pulls any image: pinned, a build
+  # does not depend on whatever Docker Hub serves that day.
+  SBOM_GENERATOR: docker.io/docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+
 jobs:
   image:
-    runs-on: ubuntu-latest
+    # Fork PRs run on GitHub's runners, never in the network.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
+    outputs:
+      image: ghcr.io/${{ github.repository }}
+      digest: ${{ steps.build.outputs.digest || steps.buildctl.outputs.digest }}
     env:
       PUSH: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -41,7 +70,11 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
 
-      - if: env.PUSH == 'true'
+      # GitHub's runners: Buildx, with its cache in GitHub's.
+      - if: runner.environment == 'github-hosted'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - if: runner.environment == 'github-hosted' && env.PUSH == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -49,6 +82,7 @@ jobs:
           password: ${{ github.token }}
 
       - id: build
+        if: runner.environment == 'github-hosted'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ inputs.context }}
@@ -57,16 +91,92 @@ jobs:
           push: ${{ env.PUSH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_COMMIT=${{ github.sha }}
           provenance: mode=max
-          sbom: true
+          sbom: generator=${{ env.SBOM_GENERATOR }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The self-hosted runners: the instance's BuildKit, at $BUILDKIT_HOST.
+      # The credentials live under RUNNER_TEMP, which the runner empties when
+      # the job ends; buildctl hands them to BuildKit over its session. Every
+      # job logs in: a private repo's cache needs it even to be read.
+      - name: GHCR credentials, for this job alone
+        if: runner.environment == 'self-hosted'
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/docker" >> "$GITHUB_ENV"
+          mkdir -m 0700 "$RUNNER_TEMP/docker"
+          auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/docker/config.json"
+
+      # The cache is read on every build and written only by main's, so a PR
+      # never changes what main builds from.
+      - id: buildctl
+        if: runner.environment == 'self-hosted'
+        env:
+          CONTEXT: ${{ inputs.context }}
+          FILE: ${{ inputs.file }}
+          PLATFORMS: ${{ inputs.platforms }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          cache="$IMAGE:buildcache"
+          args=(
+            --frontend dockerfile.v0
+            --local "context=$CONTEXT"
+            --local "dockerfile=$(dirname "$FILE")"
+            --opt "filename=$(basename "$FILE")"
+            --opt "platform=$PLATFORMS"
+            --opt "build-arg:APP_COMMIT=$GITHUB_SHA"
+            --opt attest:provenance=mode=max
+            --opt "attest:sbom=generator=$SBOM_GENERATOR"
+            --import-cache "type=registry,ref=$cache"
+            --metadata-file "$RUNNER_TEMP/build.json"
+          )
+          while IFS= read -r label; do
+            [ -z "$label" ] || args+=(--opt "label:$label")
+          done <<< "$LABELS"
+          names=$(paste -sd, - <<< "$TAGS")
+          if [ "$PUSH" = true ]; then
+            args+=(
+              --output "type=image,\"name=$names\",push=true"
+              --export-cache "type=registry,ref=$cache,mode=max,image-manifest=true,oci-mediatypes=true"
+            )
+          else
+            args+=(--output "type=image,\"name=$names\",push=false")
+          fi
+          start=$(date +%s)
+          buildctl build "${args[@]}"
+          echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          echo "digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/build.json")" >> "$GITHUB_OUTPUT"
+
+      # What a build costs a CI VM, whose 2 vCPU and 4 GB its two runners
+      # share: how long it took, and the peak memory of the instance's
+      # BuildKit unit, which starts empty before every job.
+      - name: footprint
+        if: always() && runner.environment == 'self-hosted'
+        env:
+          SECONDS_TAKEN: ${{ steps.buildctl.outputs.seconds }}
+        run: |
+          instance=$(basename "$(dirname "${BUILDKIT_HOST#unix://}")")
+          peak=$(systemctl show -P MemoryPeak "github-runner-buildkit@$instance.service" 2>/dev/null || true)
+          case "$peak" in
+            ''|'[not set]'|infinity) peak=unknown ;;
+            *) peak="$(( peak / 1024 / 1024 )) MiB" ;;
+          esac
+          {
+            echo "### Build footprint"
+            echo
+            echo "- Build: ${SECONDS_TAKEN:-unknown} s"
+            echo "- BuildKit's peak memory: $peak"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: summary
         if: env.PUSH == 'true'
         env:
-          IMAGE: ghcr.io/${{ github.repository }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest || steps.buildctl.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {

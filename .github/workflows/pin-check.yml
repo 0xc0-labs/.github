@@ -1,0 +1,124 @@
+# Reusable: check every environment's pin in a GitOps repo, and keep the
+# org's bots to pins.
+#
+# - Where a kustomization.yaml generates the `release` ConfigMap, its
+#   APP_VERSION must equal the newTag of the application's image, the one
+#   images entry under ghcr.io/<owner>/: the version a service reports is
+#   the one it runs.
+# - A PR the org's GitHub Apps open (the promoter's promotions, Renovate's
+#   updates) may change one environment's pin and nothing else: the
+#   application's image newTag and digest, and APP_VERSION, in one
+#   apps/<app>/<env>/kustomization.yaml. Staging's promotions merge
+#   themselves, so a bot's PR that reaches further fails here. Its author and
+#   its changes come from the event and the API, never from the PR's branch,
+#   and this rule runs from .github@main: the PR cannot change what checks it.
+#
+# Not named release*: that glob is the Vault role the release jobs log in
+# with, and this one logs in nowhere.
+name: pin-check
+
+on:
+  workflow_call:
+    inputs:
+      pins:
+        description: Glob of the kustomization.yaml files to check, relative to the repo root.
+        type: string
+        default: apps/*/*/kustomization.yaml
+      tools:
+        description: mise tools to install, pinned in the caller's mise.toml.
+        type: string
+        default: yq
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      PINS: ${{ inputs.pins }}
+      OWNER: ${{ github.repository_owner }}
+      BOT: ${{ github.event_name == 'pull_request' && contains(fromJSON('["0xc0-labs-promoter[bot]", "0xc0-labs-renovate[bot]"]'), github.event.pull_request.user.login) }}
+    steps:
+      # Before anything from the PR's branch is checked out or installed. The
+      # diff is the PR's own, from its merge base.
+      - name: bot's PR
+        id: bot
+        if: env.BOT == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const { data } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${pr.base.sha}...${pr.head.sha}`,
+            });
+            const files = data.files ?? [];
+            const named = files.map((f) => `${f.filename} (${f.status})`).join(', ') || 'nothing';
+            const [file] = files;
+            if (files.length !== 1 || file.status !== 'modified' || !/^apps\/[^/]+\/[^/]+\/kustomization\.yaml$/.test(file.filename)) {
+              core.setFailed(`${pr.user.login} may change one environment's apps/<app>/<env>/kustomization.yaml and nothing else; this PR changes: ${named}`);
+              return;
+            }
+            if (!file.patch) {
+              core.setFailed(`${file.filename}: GitHub gives no diff to check.`);
+              return;
+            }
+            const pin = /^\s*(newTag|digest):\s|^\s*-\s*APP_VERSION=/;
+            const outside = file.patch.split('\n').filter((l) => /^[-+]/.test(l) && !pin.test(l.slice(1)));
+            if (outside.length) {
+              core.setFailed(`${pr.user.login} may change only the pin in ${file.filename}; these lines are outside it:\n${outside.join('\n')}`);
+              return;
+            }
+            // Both sides, for the pin's fields to be checked by what they
+            // belong to, not only by their name.
+            const read = async (ref) => Buffer.from(
+              (await github.rest.repos.getContent({ owner, repo, path: file.filename, ref })).data.content, 'base64');
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/pin-before.yaml`, await read(data.merge_base_commit.sha));
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/pin-after.yaml`, await read(pr.head.sha));
+            core.setOutput('path', file.filename);
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: ${{ inputs.tools }}
+
+      # The lines a bot changed are named newTag, digest or APP_VERSION. Here
+      # they must also be the application's image's and the release
+      # ConfigMap's: with those three blanked out, both sides are the same.
+      - name: bot's pin
+        if: env.BOT == 'true'
+        env:
+          PIN: ${{ steps.bot.outputs.path }}
+        run: |
+          blank='(.images[] | select(.name | test("^ghcr\\.io/" + strenv(OWNER) + "/")) | (.newTag, .digest)) = "" |
+                 (.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION="'
+          before=$(yq -o json -I 0 "$blank" "$RUNNER_TEMP/pin-before.yaml")
+          after=$(yq -o json -I 0 "$blank" "$RUNNER_TEMP/pin-after.yaml")
+          if [ "$before" != "$after" ]; then
+            echo "::error file=$PIN::The bot's change reaches past the application's image and APP_VERSION."
+            exit 1
+          fi
+          echo "$PIN: only its pin changes."
+
+      - name: pins
+        run: |
+          status=0
+          for pin in $PINS; do
+            [ -f "$pin" ] || continue
+            version=$(yq '[.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION=")) | sub("^APP_VERSION="; "")] | .[0] // ""' "$pin")
+            [ -n "$version" ] || continue
+            read -r count tag < <(yq '[.images[] | select(.name | test("^ghcr\\.io/" + strenv(OWNER) + "/"))] | [length, (.[0].newTag // "")] | join(" ")' "$pin")
+            if [ "$count" != 1 ]; then
+              echo "::error file=$pin::APP_VERSION is $version, and $count images are under ghcr.io/$OWNER/: the application's must be the only one."
+              status=1
+            elif [ "$tag" != "$version" ]; then
+              echo "::error file=$pin::APP_VERSION is $version, but the image's newTag is ${tag:-unset}."
+              status=1
+            else
+              echo "$pin: $version"
+            fi
+          done
+          exit $status

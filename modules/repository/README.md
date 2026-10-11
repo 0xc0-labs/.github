@@ -47,6 +47,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_allow_auto_merge"></a> [allow\_auto\_merge](#input\_allow\_auto\_merge) | Let a PR be set to merge itself once its required checks pass. Only where a bot opens PRs that need no human review. | `bool` | `false` | no |
 | <a name="input_auto_init"></a> [auto\_init](#input\_auto\_init) | Create the repo with an initial commit on main. Only for a brand-new repo with no history elsewhere: set at creation, it never changes afterwards. | `bool` | `false` | no |
 | <a name="input_description"></a> [description](#input\_description) | One-line description shown on GitHub. | `string` | n/a | yes |
 | <a name="input_name"></a> [name](#input\_name) | Repository name. | `string` | n/a | yes |

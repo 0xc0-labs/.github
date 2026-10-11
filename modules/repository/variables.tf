@@ -48,6 +48,12 @@ variable "production_environment_reviewers" {
   default     = []
 }
 
+variable "allow_auto_merge" {
+  description = "Let a PR be set to merge itself once its required checks pass. Only where a bot opens PRs that need no human review."
+  type        = bool
+  default     = false
+}
+
 variable "auto_init" {
   description = "Create the repo with an initial commit on main. Only for a brand-new repo with no history elsewhere: set at creation, it never changes afterwards."
   type        = bool

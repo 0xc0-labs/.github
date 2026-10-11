@@ -13,6 +13,7 @@ resource "github_repository" "main" {
   squash_merge_commit_title   = "PR_TITLE"
   squash_merge_commit_message = "PR_BODY"
   delete_branch_on_merge      = true
+  allow_auto_merge            = var.allow_auto_merge
 
   auto_init = var.auto_init
 
