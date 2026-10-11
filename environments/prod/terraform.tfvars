@@ -25,10 +25,11 @@ repositories = {
     required_checks        = ["issue / check", "plan / tofu"]
   }
   "gitops" = {
-    description     = "ArgoCD manifests for the cluster"
-    topics          = ["argocd", "0xc0"]
-    required_checks = ["issue / check"]
-    # Staging's promotion PRs merge themselves; prod's never do.
+    description = "ArgoCD manifests for the cluster"
+    topics      = ["argocd", "0xc0"]
+    # validate.yml runs both of its jobs on every PR, with no paths filter.
+    required_checks = ["issue / check", "validate / validate", "pin / check"]
+    # Staging's promotion PRs merge themselves, once these pass; prod's never do.
     allow_auto_merge = true
   }
   "vault" = {
