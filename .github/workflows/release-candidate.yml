@@ -7,6 +7,12 @@
 # (git-cliff, with the caller's cliff.toml): vX.Y.Z-rc.N, N one past the last
 # rc of X.Y.Z. A rerun on a commit that has its rc already reuses it.
 #
+# A failed run can be rerun, and finishes what the first left undone. Each
+# step that publishes something looks for it first: the git tag, the image's
+# tag, the npm version, the promotion PR. What is there and matches (the same
+# commit, digest or package contents) is skipped with a line saying so; what
+# is there and differs fails the run.
+#
 # git-cliff and crane come from the caller's mise.toml, node too when it
 # publishes a package; yq from gitops' own. The job logs in to Vault, only to
 # sign as the 0xc0-labs-promoter App: Vault's role for the caller's repo is
@@ -103,9 +109,25 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           digest=$(crane digest "$IMAGE:sha-${GITHUB_SHA::7}")
-          git rev-parse -q --verify "refs/tags/$TAG" > /dev/null || git tag "$TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG"
-          crane tag "$IMAGE@$digest" "$TAG"
+          tagged=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
+          if [ -z "$tagged" ]; then
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+          elif [ "$tagged" = "$GITHUB_SHA" ]; then
+            echo "The tag $TAG is on $GITHUB_SHA already."
+          else
+            echo "::error::The tag $TAG is on $tagged, not on $GITHUB_SHA."
+            exit 1
+          fi
+          if current=$(crane digest "$IMAGE:$TAG" 2> /dev/null); then
+            if [ "$current" != "$digest" ]; then
+              echo "::error::$IMAGE:$TAG is $current, not $digest."
+              exit 1
+            fi
+            echo "$IMAGE:$TAG is $digest already."
+          else
+            crane tag "$IMAGE@$digest" "$TAG"
+          fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
             echo "### Release candidate"
@@ -127,11 +149,18 @@ jobs:
           printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
             '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
-          if npm view "$name@$version" version > /dev/null 2>&1; then
-            echo "$name@$version is published already."
+          npm pkg set "version=$version"
+          # npm packs the same bytes from the same files: what this commit
+          # would publish, compared with what the registry has, if anything.
+          ours=$(npm pack --dry-run --json --ignore-scripts | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].integrity')
+          if theirs=$(npm view "$name@$version" dist.integrity 2> /dev/null) && [ -n "$theirs" ]; then
+            if [ "$theirs" != "$ours" ]; then
+              echo "::error::$name@$version is published with other contents ($theirs, not $ours)."
+              exit 1
+            fi
+            echo "$name@$version is published already, with these contents."
             exit 0
           fi
-          npm pkg set "version=$version"
           npm publish --tag rc --ignore-scripts
 
       - name: vault
@@ -260,33 +289,51 @@ jobs:
             const prefix = `chore/promote-${APP}-${ENVIRONMENT}-`;
             const branch = `${prefix}${VERSION}`;
 
-            try {
-              await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: BASE });
-            } catch (e) {
-              if (e.status !== 422) throw e;
-              await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: BASE, force: true });
+            // A rerun finds the PR an earlier run opened. Open, it is this
+            // promotion's if its pin carries this version and digest; closed or
+            // merged, it is never opened again.
+            const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', head: `${owner}:${branch}` });
+            let pr = prs.find((p) => p.state === 'open');
+            const done = prs.find((p) => p.state === 'closed');
+            if (pr) {
+              const { data } = await github.rest.repos.getContent({ owner, repo, path: PIN, ref: pr.head.sha });
+              const pinned = Buffer.from(data.content, 'base64').toString();
+              if (!pinned.includes(`digest: ${DIGEST}`) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
+                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${DIGEST}.`);
+                return;
+              }
+              core.info(`#${pr.number} is open already with this pin.`);
+            } else if (done) {
+              core.notice(`#${done.number} promoted ${VERSION} before, and is ${done.merged_at ? 'merged' : 'closed'}: not opened again.`);
+              return;
+            } else {
+              try {
+                await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: BASE });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+                // A branch with no PR: what a run left before opening one.
+                await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: BASE, force: true });
+              }
+              await github.graphql(
+                `mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }`,
+                { input: {
+                  branch: { repositoryNameWithOwner: `${owner}/${repo}`, branchName: branch },
+                  message: { headline: TITLE },
+                  expectedHeadOid: BASE,
+                  fileChanges: { additions: [{ path: PIN, contents: fs.readFileSync(`_gitops/${PIN}`).toString('base64') }] },
+                } },
+              );
+              const body = [
+                `\`${APP}\` in ${ENVIRONMENT}: \`${VERSION}\`.`,
+                '',
+                `- Version: \`${VERSION}\``,
+                `- Digest: \`${DIGEST}\`, of \`${IMAGE}\``,
+                `- Tag: ${LINK}`,
+                '',
+                'It merges itself once its checks pass.',
+              ].join('\n');
+              pr = (await github.rest.pulls.create({ owner, repo, base: 'main', head: branch, title: TITLE, body })).data;
             }
-            await github.graphql(
-              `mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }`,
-              { input: {
-                branch: { repositoryNameWithOwner: `${owner}/${repo}`, branchName: branch },
-                message: { headline: TITLE },
-                expectedHeadOid: BASE,
-                fileChanges: { additions: [{ path: PIN, contents: fs.readFileSync(`_gitops/${PIN}`).toString('base64') }] },
-              } },
-            );
-
-            const body = [
-              `\`${APP}\` in ${ENVIRONMENT}: \`${VERSION}\`.`,
-              '',
-              `- Version: \`${VERSION}\``,
-              `- Digest: \`${DIGEST}\`, of \`${IMAGE}\``,
-              `- Tag: ${LINK}`,
-              '',
-              'It merges itself once its checks pass.',
-            ].join('\n');
-            const [open] = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', head: `${owner}:${branch}` });
-            const pr = open ?? (await github.rest.pulls.create({ owner, repo, base: 'main', head: branch, title: TITLE, body })).data;
             core.notice(`${TITLE}: ${pr.html_url}`);
 
             const others = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base: 'main' });
@@ -297,7 +344,9 @@ jobs:
               await github.rest.git.deleteRef({ owner, repo, ref: `heads/${old.head.ref}` });
             }
 
-            if (AUTO_MERGE === 'true') {
+            if (AUTO_MERGE === 'true' && pr.auto_merge) {
+              core.info(`#${pr.number} is set to merge itself already.`);
+            } else if (AUTO_MERGE === 'true') {
               try {
                 await github.graphql(
                   `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }`,
