@@ -233,6 +233,11 @@ jobs:
 # .github/workflows/release.yml
 on:
   workflow_dispatch:
+    inputs:
+      rc:
+        description: The rc to release, vX.Y.Z-rc.N. Empty, the rc staging runs.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -247,7 +252,14 @@ jobs:
     with:
       app: payload
       npm-package: packages/payload-types
+      rc: ${{ inputs.rc }}
 ```
+
+Leave `rc` empty: the release takes the rc staging runs. Name it only to
+finish a release whose run failed after staging moved to a newer rc. A rerun
+of the failed run reads staging again and would release the newer rc; a new
+run naming the failed one's rc finishes that release instead. A named rc must
+exist, as an image tag and as a git tag, or the run fails.
 
 GHCR creates every package private, and only the web UI can change that, so
 a new public application takes one manual step. After the first push to
