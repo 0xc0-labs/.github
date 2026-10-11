@@ -23,7 +23,7 @@ mise.toml                  pinned tool versions
   ansible.yml              reusable: the affected playbooks, in parallel; --check on a PR; for real, once approved
   kustomize-validate.yml   reusable: render each Kustomize component as Argo CD does, and validate it
   pin-check.yml            reusable: each environment's APP_VERSION is its image's newTag
-  node-check.yml           reusable: lint, type-check and build a Node app, with its mise.toml's node and pnpm
+  node-check.yml           reusable: lint, type-check, build and, when asked, test a Node app, with its mise.toml's node and pnpm
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
   release.yml              reusable: by hand, release the rc staging runs and open prod's PR in gitops
@@ -122,6 +122,12 @@ tagged `sha-<7>` and `main`. The image carries its commit: the build passes
 at the versions there, checked against its `mise.lock`. A tool the repo
 declares for people (a language server, Claude Code's plugins, a local object
 store) is never downloaded by CI. Its `tools` input adds names to that list.
+
+With `test: true`, `node-check` runs `pnpm test` after the build, on the same
+runner. The tests bring up what they need themselves, and the workflow starts
+no service: `payload`'s start their own PostgreSQL from mise, on a Unix socket
+in a temporary directory, with nothing listening on the network. `tools`
+carries what they need: `tools: conda:postgresql`.
 
 Where they run depends on the repo:
 

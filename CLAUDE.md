@@ -35,10 +35,11 @@ into the workspace repo at exactly the path GitHub reads.
   Argo CD does, and validates it; `pin-check` checks that each environment's
   `APP_VERSION` is its image's `newTag`, and fails a PR of the org's Apps
   that changes anything but one environment's pin. `node-check` lints,
-  type-checks and builds a Node app, with only the node and pnpm of its
-  `mise.toml`; `container-image` builds an app's image and, on `main`,
-  pushes it to GHCR (`sha-<7>` and `main`, never `latest`): with Buildx on
-  GitHub's runners, with rootless BuildKit on the self-hosted ones. The
+  type-checks, builds and, when asked, tests a Node app, with only the node
+  and pnpm of its `mise.toml` and the tools it names; `container-image`
+  builds an app's image and, on `main`, pushes it to GHCR (`sha-<7>` and
+  `main`, never `latest`): with Buildx on GitHub's runners, with rootless
+  BuildKit on the self-hosted ones. The
   delivery: `release-candidate`, on every push to `main`, tags the next rc
   on the commit and on the image's digest, and opens staging's PR in
   `gitops`, which merges itself; `release`, run by hand, makes the rc staging

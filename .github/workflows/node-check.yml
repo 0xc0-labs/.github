@@ -1,9 +1,14 @@
-# Reusable: lint, type-check and build a Node app with its own mise toolchain.
+# Reusable: lint, type-check and build a Node app with its own mise toolchain,
+# and with `test: true`, run its tests after the build: `pnpm test`, on the
+# same runner. The tests bring up what they need themselves, and this workflow
+# starts no service: payload's start their own PostgreSQL from mise, on a Unix
+# socket in a temporary directory, with no TCP port.
+#
 # From the caller's mise.toml it installs only what its steps run, node and
 # pnpm, at the versions there, checked against its mise.lock. The tools a repo
 # declares for people (a language server, Claude Code's plugins, a local
-# object store) are not downloaded. `tools` adds names to that list; none of
-# today's callers needs it.
+# object store) are not downloaded. `tools` adds names to that list: what the
+# tests need, as payload's `tools: conda:postgresql`.
 name: node-check
 
 on:
@@ -25,9 +30,15 @@ on:
       tools:
         description: >-
           mise tools to install besides node and pnpm, space-separated,
-          pinned in the caller's mise.toml.
+          pinned in the caller's mise.toml: what the tests need.
         type: string
         default: ''
+      test:
+        description: >-
+          Run `pnpm test` after the build. The tests start what they need
+          themselves; the tools they need go in `tools`.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,3 +68,7 @@ jobs:
 
       - name: build
         run: pnpm build
+
+      - name: test
+        if: inputs.test
+        run: pnpm test
