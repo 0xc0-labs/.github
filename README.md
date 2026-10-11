@@ -149,14 +149,22 @@ and `apps/<app>/prod/`, each with its pin):
    rebuilding the image, and publishes the npm package, when there is one,
    as `X.Y.Z-rc.N` under the `rc` dist-tag. Then it opens a PR in `gitops`
    that changes only staging's pin, closes the older staging PRs still open,
-   and sets it to merge itself once its checks pass.
+   and sets it to merge itself once its checks pass. A failed run can be
+   rerun: on the same commit it reuses its rc, skips what it finds published
+   and matching, fails on what differs, and never opens again a staging PR
+   that was closed or merged, so an old rc cannot roll staging back.
 2. **A release** is `release`, run by hand (`workflow_dispatch`). It reads
    staging's pin on `gitops`' `main`, checks that the rc's tag names the
    pinned digest, and makes `vX.Y.Z` of it: a tag on the same commit, a
    GitHub Release with `git-cliff`'s changelog since the last release, the
-   same digest tagged `vX.Y.Z`, and the package as `X.Y.Z`. It fails if that
-   release exists. Then it opens prod's PR in `gitops`, which never merges
-   itself: merging it is prod's approval. Rolling back is reverting it.
+   same digest tagged `vX.Y.Z`, and the package as `X.Y.Z`. Then it opens
+   prod's PR in `gitops`, which never merges itself: merging it is prod's
+   approval. Rolling back is reverting it. A failed run can be rerun, and
+   finishes what the first left undone: the tag, the Release, the image's
+   tag, the package and prod's PR are each skipped when they are there and
+   match, and fail the run when they differ (the tag on another commit, the
+   image's tag on another digest, the package with other contents, an open
+   PR with another pin).
 
 Both PRs are opened by the `0xc0-labs-promoter` App, whose key never leaves
 Vault: the job logs in with the JWT role named after its repo (bound to
