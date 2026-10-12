@@ -661,14 +661,31 @@ runs on GitHub's runners, and `--metrics=off` keeps telemetry off.
   [`semgrep/semgrep-rules`](https://github.com/semgrep/semgrep-rules), the
   `rules-ref` input, never a registry config (`p/...`) that changes between
   runs. They are fetched at that commit, not vendored: the repo is public.
-  `rule-sets` picks the directories, by what the org writes: `typescript`,
-  `javascript` (TypeScript and JavaScript), `terraform` (HCL),
-  `yaml/kubernetes` and `yaml/github-actions` (manifests and workflows),
-  `dockerfile`, `bash` and `python`. Not run: other languages the org does
-  not write, `generic` (secrets are Vault's and GitHub's secret scanning's),
-  and `yaml/semgrep` (rules for writing rules). Bumping `rules-ref` is one
-  PR here, for every caller, and its findings in each repo are fixed or
-  waived there.
+  Bumping `rules-ref` is one PR here, for every caller, and its findings in
+  each repo are fixed in that repo's PR.
+- **Security rules only** (operator decision, 2026-10-12; .github#136). The
+  workflow keeps, from the `rule-sets` directories, each rule whose metadata
+  `category` is `security`, chosen rule by rule because most directories mix
+  categories, and runs nothing else. The first runs under `rule-sets` by
+  language mixed in style, React, i18n and best-practice rules, and their
+  findings were waived, not fixed.
+  - **In**: `typescript` and `javascript` (TypeScript and JavaScript),
+    `terraform` (HCL), `yaml/kubernetes` and `yaml/github-actions`
+    (manifests and workflows), `dockerfile`, `bash` and `python`.
+  - **Out, by category**: `best-practice`, `correctness`, `portability`,
+    `compatibility`, `maintainability`, `performance`, `caching` and `audit`,
+    wherever they sit: `react` and `lang` in `typescript` and `javascript`,
+    the cloud-provider directories of `terraform`, `yaml/kubernetes/best-practice`,
+    `dockerfile/best-practice` and `dockerfile/correctness`, and the style
+    and framework-convention rules of `python`. That drops the React
+    props, i18n and sleep rules, and `third-party-action-not-pinned-to-commit-sha`
+    (`audit`; `pin-check` holds every action to a SHA).
+  - **Out, by directory**: `yaml/semgrep` (rules for writing rules),
+    `generic` (secrets are Vault's and GitHub's secret scanning's), and the
+    languages the org does not write.
+  - The selection relies on the rule files' layout (each rule opening with
+    `- id:`); the job fails if it selects none, and a bump of `rules-ref`
+    checks the count it prints.
 - **The licence** is the Semgrep Rules License v1.0: the rules may be used
   "only for your own internal business purposes", and not distributed or made
   available to others as a service. A scan of our own code in our own CI is
@@ -703,10 +720,20 @@ uv = "0.12.17"
 "pipx:semgrep" = "1.180.0"
 ```
 
-To waive a false positive, put `nosemgrep: <rule-id>` and the reason in a
-comment on the line the finding names, the rule's last segment as the summary
-shows it: `# nosemgrep: unsafe-add-mask-workflow-command - the reason`. A
-waiver without a reason does not pass review.
+### The rule for a finding
+
+- **A finding is fixed in the PR that meets it.**
+- **`nosemgrep: <rule-id>` is only for a false positive**: the code already
+  does what the rule asks, and the comment says where (the validating
+  function, the escaping call, the pinned value). Put it on the line the
+  finding names, with the rule's last segment as the summary shows it:
+  `# nosemgrep: unsafe-add-mask-workflow-command - the reason, and where`. A
+  waiver without that does not pass review.
+- **A rule that does not fit our code is a ruleset decision**, made here with
+  its reason (a directory or a rule left out of the list above), never a
+  waiver on each line.
+- **A real weakness is never waived.** If it cannot be fixed in that PR, its
+  fix is an issue of its own that blocks the PR.
 
 ## Bootstrap
 
