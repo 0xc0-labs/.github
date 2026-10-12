@@ -1,7 +1,5 @@
-# Reusable: run the Ansible playbooks a change affects, one job each. A PR runs
-# the caller's ansible-lint, then --check --diff as the review; a push to main
-# runs for real once the operator approves the environment, which is the human
-# launching the run.
+# Reusable: the Ansible playbooks a change affects, one job each: on a PR,
+# lint and --check; on main, for real (README, Using the reusable workflows).
 name: ansible
 
 on:
@@ -186,7 +184,6 @@ jobs:
         with:
           install_args: ${{ inputs.tools }}
 
-      # JWT login with the job's OIDC token: no Vault credential is stored.
       - name: vault
         if: inputs.vault-addr != ''
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0

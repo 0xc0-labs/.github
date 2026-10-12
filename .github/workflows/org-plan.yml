@@ -18,7 +18,6 @@ jobs:
     with:
       working-directory: environments/prod
       runs-on: '{"group": "0xc0", "labels": "0xc0"}'
-      # Also re-plan when the tofu workflows themselves change.
       paths: '^(environments/|modules/|mise\.toml$|\.github/workflows/(tofu|org)-)'
       vault-addr: https://vault.int.0xc0.cc
       vault-role: github

@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Runs tofu against one environment with the secrets read from Vault into the
-# environment only, never onto disk: the org's GitHub App (ci/github/org-app)
-# and the state's credentials (ci/shared/rustfs). Over WARP, logged in to
-# Vault (vault login -no-print). A variable already set is not read again.
-# Usage: scripts/tofu <environment> <tofu args...>   e.g. scripts/tofu prod plan
+# tofu on one environment, its secrets from Vault: README, Running it locally.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,7 +9,7 @@ shift
 
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.int.0xc0.cc}"
 checked=""
-vault_env() { # variable path key
+vault_env() {
   local var="$1" path="$2" key="$3" value
   [ -z "${!var:-}" ] || return 0
   if [ -z "$checked" ]; then
@@ -29,7 +25,6 @@ vault_env TF_VAR_github_app_private_key github/org-app private_key
 vault_env AWS_ACCESS_KEY_ID shared/rustfs access_key_id
 vault_env AWS_SECRET_ACCESS_KEY shared/rustfs secret_access_key
 
-# Wait for CI to release the state lock rather than failing straight away.
 export TF_CLI_ARGS_plan="${TF_CLI_ARGS_plan:--lock-timeout=5m}"
 export TF_CLI_ARGS_apply="${TF_CLI_ARGS_apply:--lock-timeout=5m}"
 

@@ -1,22 +1,5 @@
-# Reusable: cut an application's next release candidate on a push to main,
-# after its image job, and offer it to staging: a PR in gitops that changes
-# only staging's pin, and merges itself once gitops' checks pass. The image is
-# never rebuilt: the rc tags the digest main's build pushed as sha-<7>.
-#
-# The version comes from the Conventional Commits since the last release
-# (git-cliff, with the caller's cliff.toml): vX.Y.Z-rc.N, N one past the last
-# rc of X.Y.Z. A rerun on a commit that has its rc already reuses it.
-#
-# A failed run can be rerun, and finishes what the first left undone. Each
-# step that publishes something looks for it first: the git tag, the image's
-# tag, the npm version, the promotion PR. What is there and matches (the same
-# commit, digest or package contents) is skipped with a line saying so; what
-# is there and differs fails the run.
-#
-# git-cliff and crane come from the caller's mise.toml, node too when it
-# publishes a package; yq from gitops' own. The job logs in to Vault, only to
-# sign as the 0xc0-labs-promoter App: Vault's role for the caller's repo is
-# bound to main and to this workflow and release.yml (release*.yml).
+# Reusable: on a push to main, after the image job, cut the next rc and offer
+# it to staging in gitops (README, Application repos).
 name: release-candidate
 
 on:
@@ -42,9 +25,8 @@ on:
 
 env:
   VAULT_ADDR: https://vault.int.0xc0.cc
-  # Whatever the caller's cliff.toml says: only a release is the previous
-  # version, never an rc; the first one is 0.1.0; while in 0.x, a breaking
-  # change bumps the minor.
+  # Over the caller's cliff.toml: the previous version is a release, never an
+  # rc; in 0.x, a breaking change bumps the minor.
   GIT_CLIFF__GIT__TAG_PATTERN: '^v[0-9]+\.[0-9]+\.[0-9]+$'
   GIT_CLIFF__BUMP__INITIAL_TAG: v0.1.0
   GIT_CLIFF__BUMP__BREAKING_ALWAYS_BUMP_MAJOR: "false"
@@ -101,8 +83,6 @@ jobs:
           auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/docker/config.json"
 
-      # The commit and the image take the same name; the image keeps its
-      # digest.
       - name: tag
         id: tag
         env:
@@ -150,8 +130,7 @@ jobs:
             '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
           npm pkg set "version=$version"
-          # npm packs the same bytes from the same files: what this commit
-          # would publish, compared with what the registry has, if anything.
+          # npm packs the same bytes from the same files, so integrities compare.
           ours=$(npm pack --dry-run --json --ignore-scripts | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].integrity')
           if theirs=$(npm view "$name@$version" dist.integrity 2> /dev/null) && [ -n "$theirs" ]; then
             if [ "$theirs" != "$ours" ]; then
@@ -178,9 +157,8 @@ jobs:
             ci/data/shared/github-promoter-app app_id | APP_ID ;
             ci/data/shared/github-promoter-app installation_id | INSTALLATION_ID ;
 
-      # The runners' pattern (infrastructure, github-runner-jit): Transit signs
-      # the App's JWT, and the key never leaves Vault. The token it buys is
-      # narrowed to gitops, contents and pull requests.
+      # Transit signs the App's JWT, as for the runners (infrastructure,
+      # github-runner-jit; README, Application repos).
       - name: promoter token
         id: promoter
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -266,7 +244,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # The commit goes through the API, so GitHub signs it as the App's.
-      # Older promotions of staging still open are superseded by this one.
       - name: promotion PR
         if: steps.pin.outputs.changed == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -289,9 +266,8 @@ jobs:
             const prefix = `chore/promote-${APP}-${ENVIRONMENT}-`;
             const branch = `${prefix}${VERSION}`;
 
-            // A rerun finds the PR an earlier run opened. Open, it is this
-            // promotion's if its pin carries this version and digest; closed or
-            // merged, it is never opened again.
+            // A closed or merged promotion is never opened again: an old rc
+            // cannot roll staging back.
             const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', head: `${owner}:${branch}` });
             let pr = prs.find((p) => p.state === 'open');
             const done = prs.find((p) => p.state === 'closed');
