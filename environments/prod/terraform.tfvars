@@ -43,7 +43,7 @@ repositories = {
     description     = "Landing page for offby1.cc"
     topics          = ["0xc0", "app", "nextjs"]
     auto_init       = true
-    required_checks = ["issue / check"]
+    required_checks = ["issue / check", "check / check", "image / image"]
   }
   "artistlabco.com" = {
     description = "Website for artistlabco.com"
