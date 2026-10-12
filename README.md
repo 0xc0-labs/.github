@@ -25,6 +25,7 @@ mise.toml                  pinned tool versions
   kustomize-validate.yml   reusable: render each Kustomize component as Argo CD does, and validate it
   pin-check.yml            reusable: each environment's APP_VERSION is its image's newTag
   node-check.yml           reusable: lint, type-check, build and, when asked, test a Node app, with its mise.toml's node and pnpm
+  coverage-comment.yml     reusable: one PR comment with the coverage report node-check uploaded
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
   release.yml              reusable: release the rc staging runs, by hand, or with no staging each push to main; open prod's PR in gitops
@@ -148,22 +149,50 @@ carries what they need: `tools: conda:postgresql`.
 
 With `coverage: true` (it needs `test: true`), the tests run with Vitest's V8
 coverage (`--coverage`, reporters `json-summary` and `text-summary`), and
-`node-check` reports it two ways: a table in the job summary, and on a PR one
-comment with the same table, found by a marker in its body and edited on each
-push. The table has lines, branches, functions and statements, the total and
-each file the PR changes (the push's, on `main`). It never fails on a figure:
-no threshold, and no external coverage service (operator decision,
-2026-10-12; workspace#154: show it first).
+`node-check` puts a table in the job summary and uploads it as the
+`coverage-report` artifact of the run. The table has lines, branches,
+functions and statements, the total and each file the PR changes (the push's,
+on `main`). On a PR, the caller adds a second job that calls
+`coverage-comment`, which posts the same table as one comment, found by a
+marker in its body and edited on each push. It never fails on a figure: no
+threshold, and no external coverage service (operator decision, 2026-10-12;
+workspace#154: show it first).
+
+```yaml
+jobs:
+  check:
+    permissions:
+      contents: read
+      packages: read
+    uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
+    with:
+      test: true
+      coverage: true
+  coverage:
+    needs: check
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: 0xc0-labs/.github/.github/workflows/coverage-comment.yml@main
+```
 
 - **The repo pins** `@vitest/coverage-v8` at its Vitest's exact version, in its
   `package.json`, and configures in `vitest.config` what is measured
   (`coverage.include`, and `coverage.exclude` for tests and generated code):
   without `include`, only files a test loads show up.
-- **The caller grants** its `check` job `pull-requests: write` besides
-  `packages: read`, or the run fails before it starts. Only the comment job
-  inside `node-check` uses it, on GitHub's runner; the job that runs the code
-  keeps `contents: read`.
-- **A fork's PR** gets the job summary alone: its token is read-only.
+- **Permissions**: `node-check` asks for nothing new, so a caller that does
+  not ask for coverage changes nothing. Only the caller's `coverage` job
+  grants `pull-requests: write`, to `coverage-comment`, which holds no code of
+  the repo. A called workflow's jobs cannot get more than their caller job
+  grants, checked when the run starts, so the permission cannot sit in a job
+  of `node-check` that is skipped.
+- **A fork's PR** gets the job summary alone: `coverage-comment` skips it,
+  its token is read-only.
+- **One app per run**: the artifact's name is fixed, so a second `node-check`
+  with `coverage: true` in the same run would fail to upload it. The
+  `working-directory` input of `coverage-comment` only keeps comments of
+  different runs apart.
 
 Where they run:
 

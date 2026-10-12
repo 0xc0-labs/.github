@@ -71,8 +71,6 @@ jobs:
   check:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    outputs:
-      coverage-report: ${{ steps.coverage.outputs.report }}
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     # The same group as container-image's job, so a caller's image job needs
     # its check job (README, Concurrency).
@@ -121,22 +119,23 @@ jobs:
             pnpm test
           fi
 
-      # The report travels as a job output, so the one job that may comment
-      # needs no artifact. File names come from the PR: they reach the script
-      # only through files and the environment.
+      # The comment is coverage-comment's, a workflow of its own: this one
+      # asks its caller for no new permission. File names come from the PR:
+      # they reach the script only through files and the environment.
       - name: coverage
         id: coverage
         if: inputs.test && inputs.coverage
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
+          mkdir -p "$RUNNER_TEMP/coverage-report"
           changed="$RUNNER_TEMP/changed.txt"
           : > "$changed"
           if [ -n "${BASE_SHA//0/}" ] && git fetch --quiet --depth=1 origin "$BASE_SHA" 2> /dev/null; then
             git diff --name-only "$BASE_SHA" HEAD > "$changed"
           fi
           CHANGED_LIST="$changed" node --input-type=module <<'EOF'
-          import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+          import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
           import { relative, resolve } from 'node:path'
 
           const summaryFile = 'coverage/coverage-summary.json'
@@ -171,35 +170,13 @@ jobs:
           const report = lines.join('\n')
 
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`)
-          appendFileSync(process.env.GITHUB_OUTPUT, `report<<COVERAGE_EOF\n${report}\nCOVERAGE_EOF\n`)
+          writeFileSync(`${process.env.RUNNER_TEMP}/coverage-report/report.md`, report)
           EOF
 
-  # One comment per PR, edited on each push. A fork's token is read-only: its
-  # PR gets the job summary alone.
-  coverage-comment:
-    needs: check
-    if: >-
-      inputs.test && inputs.coverage && github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.full_name == github.repository
-      && needs.check.outputs.coverage-report != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          REPORT: ${{ needs.check.outputs.coverage-report }}
-          MARKER: '<!-- node-check-coverage:${{ inputs.working-directory }} -->'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.test && inputs.coverage
         with:
-          script: |
-            const body = `${process.env.MARKER}\n${process.env.REPORT}`
-            const { owner, repo } = context.repo
-            const issue_number = context.issue.number
-            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number })
-            const existing = comments.find((c) => c.body?.startsWith(process.env.MARKER))
-            if (existing) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body })
-            }
+          name: coverage-report
+          path: ${{ runner.temp }}/coverage-report/report.md
+          if-no-files-found: ignore
+          retention-days: 7
