@@ -68,6 +68,27 @@ checksum = "sha256:f958ec5e511063be9feb180ca015a4cb7977566a9cf6a8550bba8c2a9b5ab
 url = "https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_darwin_arm64.tar.gz"
 url_api = "https://api.github.com/repos/opentofu/opentofu/releases/assets/520762710"
 
+[[tools."pipx:semgrep"]]
+version = "1.180.0"
+backend = "pipx:semgrep"
+specifiers = ["1.180.0"]
+uv = { path = ".mise/locks/pipx-semgrep/1.180.0", digest = "sha256:f5162b6e92d810df56dca490ac3b3057674f7a54e7e5f0ee2ca042883f5eb688" }
+
+[[tools.python]]
+version = "3.12.14"
+backend = "core:python"
+specifiers = ["3.12.14"]
+
+[tools.python."platforms.linux-x64"]
+checksum = "sha256:ef605200f8174e87ecfc308e52a88127543f85dd5c940dc5e92cab244b98a003"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.12.14+20260929-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+provenance = "github-attestations"
+
+[tools.python."platforms.macos-arm64"]
+checksum = "sha256:1bb3e53d231ee2c8881e8daf6426f4dd95bff0dda496af0f3af300357aa998d0"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.12.14+20260929-aarch64-apple-darwin-install_only_stripped.tar.gz"
+provenance = "github-attestations"
+
 [[tools.terraform-docs]]
 version = "0.24.0"
 backend = "aqua:terraform-docs/terraform-docs"
@@ -82,6 +103,23 @@ url_api = "https://api.github.com/repos/terraform-docs/terraform-docs/releases/a
 checksum = "sha256:f6b114f4b032f3f9202ab6c23bfd28c3c8e68aeeb8a8f12fc118bf2073081d71"
 url = "https://github.com/terraform-docs/terraform-docs/releases/download/v0.24.0/terraform-docs-v0.24.0-darwin-arm64.tar.gz"
 url_api = "https://api.github.com/repos/terraform-docs/terraform-docs/releases/assets/416956237"
+
+[[tools.uv]]
+version = "0.12.17"
+backend = "aqua:astral-sh/uv"
+specifiers = ["0.12.17"]
+
+[tools.uv."platforms.linux-x64"]
+checksum = "sha256:fa82fd8dde8e8eefdecada6aa0889666556cfceb690d06e0c3bca49eb3070a63"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.17/uv-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/573253080"
+provenance = "github-attestations"
+
+[tools.uv."platforms.macos-arm64"]
+checksum = "sha256:85f00cbdc6dd3e97eba4c31b4d014375a9fdfe8f570023b84e5102fc3456896b"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.17/uv-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/573252913"
+provenance = "github-attestations"
 
 [[tools.vault]]
 version = "2.0.4"

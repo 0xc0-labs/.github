@@ -216,7 +216,7 @@ jobs:
       - name: mask
         if: inputs.vault-addr != ''
         run: |
-          if [ -n "${PROXMOX_VE_API_TOKEN:-}" ]; then echo "::add-mask::${PROXMOX_VE_API_TOKEN#*=}"; fi
+          if [ -n "${PROXMOX_VE_API_TOKEN:-}" ]; then echo "::add-mask::${PROXMOX_VE_API_TOKEN#*=}"; fi # nosemgrep: unsafe-add-mask-workflow-command - the token is from Vault and runs from this repo's main, not a PR's copy
 
       # Every template of the chain, before any is built. Retried: a transient
       # error from GitHub's releases must not fail the build.

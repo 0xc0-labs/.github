@@ -28,9 +28,11 @@ mise.toml                  pinned tool versions
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
   release.yml              reusable: release the rc staging runs, by hand, or with no staging each push to main; open prod's PR in gitops
   package-release.yml      reusable: on a push to main, release a package of a monorepo to GitHub Packages
+  semgrep.yml              reusable: Semgrep Community Edition over a repo, pinned engine and rules, failing on findings
   org-plan.yml             this repo: plan environments/prod on every PR
   org-apply.yml            this repo: apply it after merge, once approved
   issue.yml                this repo: run pr-issue on every PR
+  semgrep-check.yml        this repo: run semgrep on every PR and push to main
 ```
 
 ## Conventions
@@ -561,6 +563,68 @@ merged: the REST merge refuses a branch that requires a queue.
 The callers come first, the ruleset's queue last: a queue that requires a
 check its callers do not yet report on `merge_group` blocks every merge.
 Then a person merges with "Merge when ready", which queues the PR.
+
+## Semgrep
+
+`semgrep` scans a repo with Semgrep Community Edition and fails on a finding
+(operator decision, 2026-10-12; workspace#150). It logs in to nothing, so it
+runs on GitHub's runners, and `--metrics=off` keeps telemetry off.
+
+- **The engine** is the caller's: `"pipx:semgrep"` pinned in its `mise.toml`,
+  with `python` and `uv` pinned beside it, and `mise lock` (`locked = true`
+  refuses the install otherwise). The `tools` input names what to install
+  (`semgrep` by default).
+- **The rules** are a fixed commit of
+  [`semgrep/semgrep-rules`](https://github.com/semgrep/semgrep-rules), the
+  `rules-ref` input, never a registry config (`p/...`) that changes between
+  runs. They are fetched at that commit, not vendored: the repo is public.
+  `rule-sets` picks the directories, by what the org writes: `typescript`,
+  `javascript` (TypeScript and JavaScript), `terraform` (HCL),
+  `yaml/kubernetes` and `yaml/github-actions` (manifests and workflows),
+  `dockerfile`, `bash` and `python`. Not run: other languages the org does
+  not write, `generic` (secrets are Vault's and GitHub's secret scanning's),
+  and `yaml/semgrep` (rules for writing rules). Bumping `rules-ref` is one
+  PR here, for every caller, and its findings in each repo are fixed or
+  waived there.
+- **The licence** is the Semgrep Rules License v1.0: the rules may be used
+  "only for your own internal business purposes", and not distributed or made
+  available to others as a service. A scan of our own code in our own CI is
+  that use. Hence the rules are never copied into a repo.
+- **Findings** fail the job and show in the job summary with file, line and
+  rule. With `sarif: true`, on a public repo, they also go to code scanning
+  (not on a fork's PR, whose token is read-only). A private repo on GitHub
+  Free has no code scanning: it leaves `sarif` off. Every caller grants
+  `security-events: write`, whatever `sarif` says.
+
+A repo calls it with a thin caller and declares the tools:
+
+```yaml
+# .github/workflows/semgrep.yml, of an application
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  semgrep:
+    uses: 0xc0-labs/.github/.github/workflows/semgrep.yml@main
+```
+
+```toml
+# mise.toml
+python = "3.12.14"
+uv = "0.12.17"
+"pipx:semgrep" = "1.180.0"
+```
+
+To waive a false positive, put `nosemgrep: <rule-id>` and the reason in a
+comment on the line the finding names, the rule's last segment as the summary
+shows it: `# nosemgrep: unsafe-add-mask-workflow-command - the reason`. A
+waiver without a reason does not pass review.
 
 ## Bootstrap
 
