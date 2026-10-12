@@ -48,7 +48,7 @@ operator's approval. Logs, metrics and traces go to OpenObserve.
 | [`gitops`](https://github.com/0xc0-labs/gitops) | ArgoCD manifests for the cluster |
 | [`vault`](https://github.com/0xc0-labs/vault) | OpenTofu configuration of the cluster's Vault |
 | [`offby1.cc`](https://github.com/0xc0-labs/offby1.cc) | The offby1.cc landing page |
-| [`claude-config`](https://github.com/0xc0-labs/claude-config) | Claude Code plugin: agents, skills and guardrail hooks |
+| [`claude-config`](https://github.com/0xc0-labs/claude-config) | Claude Code plugin: skills and guardrail hooks |
 
 ## Principles
 
@@ -56,6 +56,6 @@ operator's approval. Logs, metrics and traces go to OpenObserve.
   pinned per repo with mise. The host's base services are the one exception.
 - **One source of truth per concern.** The design is closed in
   [`docs/design.md`](https://github.com/0xc0-labs/workspace/blob/main/docs/design.md);
-  the network in the infrastructure code, `terraform.tfvars`; the state of work on the
-  [project board](https://github.com/orgs/0xc0-labs/projects/1).
+  the network in the infrastructure code, `terraform.tfvars`; the state of
+  work on the org's project board.
 - **A human applies.** Automation plans; the operator approves.
