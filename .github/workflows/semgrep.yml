@@ -1,6 +1,7 @@
 # Reusable: Semgrep Community Edition over the caller's repo, with the engine
 # from the caller's mise.toml and a pinned commit of semgrep/semgrep-rules.
-# No login, no telemetry; a finding fails the job (README, Semgrep).
+# Only the rules whose metadata category is security run. No login, no
+# telemetry; a finding fails the job (README, Semgrep).
 #
 # Not named release*: that glob is the Vault role the release jobs log in
 # with, and this one logs in nowhere, so it runs on GitHub's runners.
@@ -17,8 +18,8 @@ on:
         default: 9bbf021d0acffa3095fcffd17b2bc7787eb4796d
       rule-sets:
         description: >-
-          Directories of semgrep-rules to run, space-separated: what the org
-          writes (README, Semgrep).
+          Directories of semgrep-rules to take the security rules from,
+          space-separated: what the org writes (README, Semgrep).
         type: string
         default: typescript javascript terraform yaml/kubernetes yaml/github-actions dockerfile bash python
       tools:
@@ -80,17 +81,48 @@ jobs:
         with:
           install_args: ${{ inputs.tools }}
 
+      # Several directories mix security with style, best-practice and
+      # framework rules, so rules are chosen one by one, not by directory.
+      # The rule files are laid out the same way, each rule opening with
+      # "  - id:" (README, Semgrep).
+      - name: select security rules
+        run: |
+          python - "$RUNNER_TEMP/security-rules" $RULE_SETS <<'PY'
+          import os, re, sys
+
+          dst, sets = sys.argv[1], sys.argv[2:]
+          start = re.compile(r"^ {0,2}- id: ")
+          security = re.compile(r"^\s+category:\s*security\s*$", re.M)
+          kept = left_out = 0
+          for rule_set in sets:
+              for dirpath, _, files in os.walk(os.path.join(".semgrep-rules", rule_set)):
+                  for name in files:
+                      if not name.endswith((".yaml", ".yml")):
+                          continue
+                      path = os.path.join(dirpath, name)
+                      lines = open(path).read().splitlines(keepends=True)
+                      starts = [i for i, line in enumerate(lines) if start.match(line)]
+                      blocks = ["".join(lines[a:b]) for a, b in zip(starts, starts[1:] + [len(lines)])]
+                      wanted = [b for b in blocks if security.search(b)]
+                      kept += len(wanted)
+                      left_out += len(blocks) - len(wanted)
+                      if wanted:
+                          out = os.path.join(dst, os.path.relpath(path, ".semgrep-rules"))
+                          os.makedirs(os.path.dirname(out), exist_ok=True)
+                          with open(out, "w") as f:
+                              f.write("rules:\n" + "".join(wanted))
+          print(f"security rules: {kept}, left out: {left_out}")
+          if kept == 0:
+              sys.exit("no security rule selected")
+          PY
+
       - name: scan
         run: |
-          configs=()
-          for set in $RULE_SETS; do
-            configs+=(--config ".semgrep-rules/$set")
-          done
           # Findings are read from the JSON, which leaves out what a nosemgrep
           # waives; the exit code is the verdict.
           status=0
           semgrep scan --metrics=off --disable-version-check --error \
-            --json-output="$RUNNER_TEMP/semgrep.json" --exclude .semgrep-rules "${configs[@]}" . || status=$?
+            --json-output="$RUNNER_TEMP/semgrep.json" --exclude .semgrep-rules --config "$RUNNER_TEMP/security-rules" . || status=$?
           echo "SEMGREP_STATUS=$status" >> "$GITHUB_ENV"
 
       - name: summary
