@@ -44,6 +44,7 @@ variable "repositories" {
     # reports blocks every PR.
     required_checks  = optional(list(string), [])
     allow_auto_merge = optional(bool, false)
+    merge_queue      = optional(bool, false)
   }))
 
   validation {

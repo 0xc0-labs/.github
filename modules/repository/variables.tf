@@ -59,3 +59,9 @@ variable "auto_init" {
   type        = bool
   default     = false
 }
+
+variable "merge_queue" {
+  description = "Require merging through a merge queue. Only once the repo's callers of every required check trigger on merge_group, or no PR can merge: README, A repo with a merge queue. Needs required_status_checks and a public repo."
+  type        = bool
+  default     = false
+}

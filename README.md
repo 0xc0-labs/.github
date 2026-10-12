@@ -564,6 +564,22 @@ The callers come first, the ruleset's queue last: a queue that requires a
 check its callers do not yet report on `merge_group` blocks every merge.
 Then a person merges with "Merge when ready", which queues the PR.
 
+The ruleset's queue (`merge_queue = true` in `terraform.tfvars`, `gitops`
+alone) is set to:
+
+- **Squash**, as every PR here; the queue ignores the method a PR names.
+- **Build up to 5, merge 1 at a time**: PRs are rare, so the build limit
+  hardly matters, and merging one per group keeps one commit on `main` per
+  PR, and one promotion per commit. They still build on top of each other.
+- **No wait**: a minimum group of 1 merges at once.
+- **All green**: each PR's own merge commit must pass the checks.
+- **Checks time out after 30 minutes**, well over `validate`'s run.
+- **No strict up-to-date policy**: the queue builds on the latest `main`,
+  which is what the policy asked of a branch, and a PR that a merge
+  overtook could not otherwise enter without someone updating it. GitHub's
+  [documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+  says the queue "provides the same benefits as" it.
+
 ## Semgrep
 
 `semgrep` scans a repo with Semgrep Community Edition and fails on a finding

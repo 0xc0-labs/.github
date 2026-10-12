@@ -71,7 +71,10 @@ resource "github_repository_ruleset" "main" {
     dynamic "required_status_checks" {
       for_each = length(var.required_status_checks) > 0 ? [1] : []
       content {
-        strict_required_status_checks_policy = true
+        # A queue builds every PR on the latest main, which is what the strict
+        # policy asks of a branch, and the queue never updates one itself: a
+        # PR that a merge overtook could not enter without someone doing it.
+        strict_required_status_checks_policy = !var.merge_queue
 
         dynamic "required_check" {
           for_each = var.required_status_checks
@@ -79,6 +82,21 @@ resource "github_repository_ruleset" "main" {
             context = required_check.value
           }
         }
+      }
+    }
+
+    # README, A repo with a merge queue: the repo's callers trigger on
+    # merge_group before this is applied.
+    dynamic "merge_queue" {
+      for_each = var.merge_queue ? [1] : []
+      content {
+        merge_method                      = "SQUASH"
+        grouping_strategy                 = "ALLGREEN"
+        max_entries_to_build              = 5
+        min_entries_to_merge              = 1
+        max_entries_to_merge              = 1
+        min_entries_to_merge_wait_minutes = 0
+        check_response_timeout_minutes    = 30
       }
     }
   }
