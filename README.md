@@ -19,7 +19,7 @@ mise.toml                  pinned tool versions
   pr-issue.yml             reusable: fail a PR that links no issue, unless one of the org's Apps opened it
   packer.yml               reusable: validate Packer templates; rebuild the affected ones, a job per chain, once approved
   hook-tests.yml           reusable: run a repo's hook test cases
-  plugin-version.yml       reusable: fail a PR that changes a Claude Code plugin without bumping its version
+  plugin-version.yml       reusable: fail a PR that changes a Claude Code plugin without bumping its version, or whose marketplace entry declares another
   ansible.yml              reusable: the affected playbooks, in parallel; --check on a PR; for real, once approved
   kustomize-validate.yml   reusable: render each Kustomize component as Argo CD does, and validate it
   pin-check.yml            reusable: each environment's APP_VERSION is its image's newTag
@@ -273,8 +273,9 @@ a new public application takes one manual step. After the first push to
 goes to Package settings and picks Change visibility → Public. Only then
 does gitops pin its digest: until it is public the cluster cannot pull the
 image, and the route answers 503. Later images of the same package are
-public already. A private application's image stays private: the cluster
-pulls it with the read-only token at `apps/shared/ghcr-pull` in Vault.
+public already, and a public package cannot go private again. A private
+application's image stays private: the cluster pulls it with the read-only
+token at `apps/shared/ghcr-pull` in Vault.
 
 ## Bootstrap
 
@@ -284,7 +285,8 @@ cannot come from CI. The order matters:
 1. **First apply, rulesets disabled.** With them active, `main` could not
    receive its initial push.
    `scripts/tofu prod apply -var bootstrap=true`
-2. **Push the existing history** of the five local repos to their new remotes.
+2. **Push the existing history** of every repo whose entry in
+   `terraform.tfvars` has no `auto_init` to its new remote.
 3. **Its secrets come from Vault** (`ci/github/org-app`, `ci/shared/rustfs`),
    read by `scripts/tofu` with the operator's token. With Vault down, restore
    it first (`vault` repo, README); in the meantime the operator can export
@@ -305,6 +307,14 @@ How its `main` gets its first commit decides the rest:
   flag, and the ruleset turns active. Every other repo stays protected
   throughout. If its CI needs secrets, it gets a `ci/<repo>/` path, a policy
   and a JWT role in the `vault` repo.
+
+The module creates no files in the repo. The `0xc0` Claude Code plugin is
+installed per machine, from the workspace, and enabling it in settings does
+not install it:
+
+```
+claude plugin install 0xc0@0xc0-labs --scope project
+```
 
 ## Concurrency
 
