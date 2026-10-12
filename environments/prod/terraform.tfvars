@@ -31,6 +31,7 @@ repositories = {
     required_checks = ["issue / check", "validate / validate", "pin / check"]
     # Staging's promotion PRs merge themselves, once these pass; prod's never do.
     allow_auto_merge = true
+    merge_queue      = true
   }
   "vault" = {
     description            = "OpenTofu configuration of the cluster's Vault"

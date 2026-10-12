@@ -8,6 +8,7 @@ module "repositories" {
   visibility          = each.value.visibility
   auto_init           = each.value.auto_init
   allow_auto_merge    = each.value.allow_auto_merge
+  merge_queue         = each.value.merge_queue
   ruleset_enforcement = var.bootstrap || each.value.bootstrap ? "disabled" : "active"
 
   required_status_checks = each.value.required_checks
