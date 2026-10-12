@@ -532,37 +532,38 @@ of its own.
 5. **A developer's machine, and a session's worktree**: pnpm takes the token
    from the user's config, outside every checkout, so a worktree under
    `.worktrees/` needs nothing of its own. The line cannot go in the app's
-   `.npmrc`, though it holds a variable's name and not the token: pnpm 12
-   refuses it there (tried at 12.8.1, the apps' pin; #124):
+   `.npmrc`: pnpm 12 ignores a credential there that holds a variable
+   (tried at 12.8.1, the apps' pin; #124), and the install then fails with a
+   401 for the package's tarball:
 
    ```
    [WARN] Ignored project-level auth setting "//npm.pkg.github.com/:_authToken":
    environment variables are not expanded in repository-controlled registry credentials.
    ```
 
-   and the install then fails with a 401 for the package's tarball. Only the
-   user's config takes an auth line with a variable, and a `mise.local.toml`
-   is missing from a fresh worktree. Once per machine, gh's token gets the
-   scope, and `~/.npmrc` a reference to it, not the token:
+   So the token itself goes in `~/.npmrc`, once per machine, by the
+   operator. Create a classic token at github.com/settings/tokens with the
+   `read:packages` scope alone and a reasonable expiry, then write it
+   without leaving it in the shell's history:
 
    ```sh
-   gh auth refresh -h github.com -s read:packages
+   read -s NPM_READ_TOKEN
+   touch ~/.npmrc && chmod 600 ~/.npmrc
+   sed -i.bak '/^\/\/npm\.pkg\.github\.com\/:_authToken=/d' ~/.npmrc && rm ~/.npmrc.bak
+   echo "//npm.pkg.github.com/:_authToken=${NPM_READ_TOKEN}" >> ~/.npmrc
+   unset NPM_READ_TOKEN
    ```
 
-   ```
-   //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
-   ```
+   A plain `pnpm install` then reads the packages, a session's included.
 
-   Then each install, a person's or a session's, gets the token for that
-   command alone:
+   Why not `gh auth token` on the command line, as before: it gave each
+   install gh's whole token (`repo`, `read:org`, ...), and Claude Code's auto
+   mode rightly refuses that, so sessions could not install. A token limited
+   to reading packages is, at worst, what a dependency could see.
 
-   ```sh
-   NODE_AUTH_TOKEN="$(gh auth token)" pnpm install
-   ```
-
-   Never exported from a profile or a `mise.toml`: every process under it,
-   a dependency's code included, would hold gh's token, which reaches far
-   more than packages.
+   Rotation is the operator's, by hand: the token expires on the date set
+   when it was created. Create a new one and run the same commands; the
+   `sed` replaces the old line.
 
 ### A repo with a merge queue
 
