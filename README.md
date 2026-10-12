@@ -27,6 +27,7 @@ mise.toml                  pinned tool versions
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
   release.yml              reusable: by hand, release the rc staging runs and open prod's PR in gitops
+  package-release.yml      reusable: on a push to main, release a package of a monorepo to GitHub Packages
   org-plan.yml             this repo: plan environments/prod on every PR
   org-apply.yml            this repo: apply it after merge, once approved
   issue.yml                this repo: run pr-issue on every PR
@@ -124,6 +125,10 @@ the build passes `APP_COMMIT`, which the Dockerfile turns into an `ENV`.
 at the versions there, checked against its `mise.lock`. A tool the repo
 declares for people (a language server, Claude Code's plugins, a local object
 store) is never downloaded by CI. Its `tools` input adds names to that list.
+Its job asks for `packages: read`, to install a private `@0xc0-labs` package
+(Shared packages, below), and a called workflow cannot get more than its
+caller grants: every caller grants its `check` job `packages: read`, or the
+run fails before it starts.
 
 With `test: true`, `node-check` runs `pnpm test` after the build, on the same
 runner. The tests bring up what they need themselves, and the workflow starts
@@ -213,6 +218,9 @@ permissions:
 
 jobs:
   check:
+    permissions:
+      contents: read
+      packages: read
     uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
     with:
       runs-on: '{"group": "0xc0", "labels": "0xc0"}'
@@ -279,6 +287,147 @@ image, and the route answers 503. Later images of the same package are
 public already, and a public package cannot go private again. A private
 application's image stays private: the cluster pulls it with the read-only
 token at `apps/shared/ghcr-pull` in Vault.
+
+### Shared packages
+
+Code two repos need alike lives once, in the private repo `packages`: a pnpm
+workspace with one package per `packages/<name>`, each published as
+`@0xc0-labs/<name>` to GitHub Packages, private, and pinned by each app that
+uses it.
+
+**The versioning scheme** (#108): each package has its own version,
+Semantic Versioning computed by `git-cliff` from the Conventional Commits
+that change its directory, whatever their scope. Since its last release, a
+`feat` bumps the minor, a `!` the major (the minor while in 0.x), and any
+other commit the patch, unless the repo's `cliff.toml` skips it. The first
+release is 0.1.0. A release is three things, all named for the package:
+
+- the tag `<name>-vX.Y.Z`, on the last commit that changed its directory;
+- a GitHub Release of that tag, with the changelog since the one before;
+- `@0xc0-labs/<name>@X.Y.Z` on GitHub Packages, under `latest`.
+
+There are no prereleases. **Merged is published**: on every push to `main`,
+after its checks, `package-release` runs once per package, and releases each
+one whose directory has something new. The others are skipped. A failed run
+can be rerun, and finishes what the first left undone. An app's issue that
+waits on a package's change turns workable when that change merges, so its
+version exists by the time the app's session starts. Apps pin versions, so a
+release changes nothing an app runs until its pin moves.
+
+What `packages` brings: a `cliff.toml`; `node`, `pnpm` and `git-cliff` in its
+`mise.toml`; and in each package's `package.json`:
+
+- `name`: `@0xc0-labs/<name>`, its directory's. The workflow fails otherwise.
+- `repository`: `{"type": "git", "url": "git+https://github.com/0xc0-labs/packages.git", "directory": "packages/<name>"}`.
+  GitHub Packages links the package to that repo, whose token publishes it.
+- `version`: `0.0.0`. The tag holds the version, and the workflow sets it
+  before it packs.
+- `files`, what it publishes, and a `build` script when it compiles: the
+  workflow runs it before packing, at the release's commit.
+- No `workspace:` dependency on another package of the repo: it would be
+  published with that one's committed `0.0.0`.
+
+```yaml
+# .github/workflows/ci.yml, of packages
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    permissions:
+      contents: read
+      packages: read
+    uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
+    with:
+      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
+      test: true
+  release:
+    needs: check
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every package, added in the PR that creates it.
+        package: [observability]
+    uses: 0xc0-labs/.github/.github/workflows/package-release.yml@main
+    with:
+      directory: packages/${{ matrix.package }}
+      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
+```
+
+**Reading one, from an app.** No secret in any repo: each place gets a token
+of its own.
+
+1. **The app** commits a `.npmrc` with the scope's registry alone, which
+   pnpm and Renovate read, and in `pnpm-workspace.yaml` exempts the org's
+   packages from `minimumReleaseAge`: they are ours, and the version merged
+   an hour ago is the one its issue waits on.
+
+   ```
+   @0xc0-labs:registry=https://npm.pkg.github.com
+   ```
+
+   ```yaml
+   minimumReleaseAgeExclude:
+     - '@0xc0-labs/*'
+   ```
+
+2. **Access**, by the operator, once per package and app, after the
+   package's first release: github.com/orgs/0xc0-labs/packages, the package,
+   Package settings, Manage Actions access, Add repository: the app, role
+   Read. Neither the GitHub provider nor the REST API sets it, so it is by
+   hand, like a package's visibility. Without it, the app's CI and image get
+   a 403 or 404 for the package.
+
+3. **CI**: `node-check` installs with the job's own token, which its caller
+   grants `packages: read` (Application repos, above). Nothing else.
+
+4. **The image**: `container-image` hands the build the secret `npmrc`, a
+   user config with the job's token, which reads what its `packages: write`
+   lets it. The Dockerfile mounts it on the install alone:
+
+   ```dockerfile
+   RUN --mount=type=secret,id=npmrc \
+       NPM_CONFIG_USERCONFIG=/run/secrets/npmrc pnpm install --frozen-lockfile
+   ```
+
+   Never as a build arg, an `ENV` or a `COPY`: those land in a layer, or in
+   the provenance. The mount is readable by root alone; a stage that runs as
+   another user adds `uid=<its uid>` to it.
+
+5. **A developer's machine, and a session's worktree**: pnpm takes the token
+   from the user's config, outside every checkout, so a worktree under
+   `.worktrees/` needs nothing of its own. A repo's `.npmrc` would put it in
+   git, and a `mise.local.toml` is missing from a fresh worktree. Once per
+   machine, gh's token gets the scope, and `~/.npmrc` a reference to it, not
+   the token:
+
+   ```sh
+   gh auth refresh -h github.com -s read:packages
+   ```
+
+   ```
+   //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+   ```
+
+   Then each install, a person's or a session's, gets the token for that
+   command alone:
+
+   ```sh
+   NODE_AUTH_TOKEN="$(gh auth token)" pnpm install
+   ```
+
+   Never exported from a profile or a `mise.toml`: every process under it,
+   a dependency's code included, would hold gh's token, which reaches far
+   more than packages.
 
 ## Bootstrap
 

@@ -1,6 +1,7 @@
 # Reusable: build a repo's image; on main, push it to GHCR (README,
 # Application repos). The self-hosted runners have no Docker: there it builds
-# with buildctl (infrastructure, ansible/roles/github_runner/README.md).
+# with buildctl (infrastructure, ansible/roles/github_runner/README.md). The
+# build secret `npmrc` reads a private package (README, Shared packages).
 name: container-image
 
 on:
@@ -65,6 +66,15 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
 
+      # Under RUNNER_TEMP, which the runner empties when the job ends.
+      - name: npm credentials, for the build alone
+        env:
+          NPM_TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" > "$RUNNER_TEMP/npmrc"
+
       - if: runner.environment == 'github-hosted'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -86,6 +96,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: APP_COMMIT=${{ github.sha }}
+          secret-files: npmrc=${{ runner.temp }}/npmrc
           provenance: mode=max
           sbom: generator=${{ env.SBOM_GENERATOR }}
           cache-from: type=gha
@@ -124,6 +135,7 @@ jobs:
             --opt "filename=$(basename "$FILE")"
             --opt "platform=$PLATFORMS"
             --opt "build-arg:APP_COMMIT=$GITHUB_SHA"
+            --secret "id=npmrc,src=$RUNNER_TEMP/npmrc"
             --opt attest:provenance=mode=max
             --opt "attest:sbom=generator=$SBOM_GENERATOR"
             --import-cache "type=registry,ref=$cache"

@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   check:
@@ -48,8 +49,15 @@ jobs:
           working_directory: ${{ inputs.working-directory }}
           install_args: node pnpm${{ inputs.tools != '' && format(' {0}', inputs.tools) || '' }}
 
+      # pnpm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
       - name: install
-        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          # shellcheck disable=SC2016
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
+          NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc" pnpm install --frozen-lockfile
 
       - name: lint
         run: pnpm lint

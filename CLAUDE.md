@@ -28,8 +28,8 @@ into the workspace repo at exactly the path GitHub reads.
   as a diff, and that is a finding, not a curiosity.
 - The self-hosted runners live on the two CI VMs, `vm-ci-01` (10.10.1.10) and
   `vm-ci-02` (10.10.1.20), ephemeral, two on each. Do not register others.
-- A reusable workflow that needs the network, or that a private application
-  runs, is listed in the runner group's `workflows`.
+- A reusable workflow that needs the network, or that a private repo runs,
+  is listed in the runner group's `workflows`.
 
 ## Outside Terraform, deliberately
 
@@ -44,6 +44,8 @@ neither is drift:
   secret (operator decision, 2026-10-02).
 - **Each package's visibility**: `README.md`, section Application repos, its
   last paragraph.
+- **Each npm package's Actions access**, the app repos that may read it:
+  `README.md`, section Shared packages.
 
 ## Visibility
 

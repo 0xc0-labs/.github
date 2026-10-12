@@ -1,0 +1,208 @@
+# Reusable: on a push to main, release one package of a monorepo when its
+# directory has something new (README, Shared packages).
+#
+# The release is the last commit that changed the directory, not the push's:
+# git-cliff, filtering commits by path, does not see a tag on a commit outside
+# it, and would count the same commits again.
+name: package-release
+
+on:
+  workflow_call:
+    inputs:
+      directory:
+        description: >-
+          The package's directory, relative to the repo root:
+          packages/<name>. Its package.json is named @<owner>/<name>.
+        type: string
+        required: true
+      runs-on:
+        description: >-
+          Where the job runs, as JSON. GitHub's runners by default;
+          '{"group": "0xc0", "labels": "0xc0"}' for the self-hosted runners,
+          which a private repo runs on, once the runner group admits it.
+        type: string
+        default: '"ubuntu-latest"'
+
+env:
+  # Whatever the caller's cliff.toml says: while in 0.x, a breaking change
+  # bumps the minor. The tag pattern and the first version are the package's,
+  # set once its name is known.
+  GIT_CLIFF__BUMP__BREAKING_ALWAYS_BUMP_MAJOR: "false"
+
+jobs:
+  release:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    permissions:
+      contents: write # the tag and the GitHub Release
+      packages: write # the npm package
+    # One release at a time per package, in order. A newer push replaces one
+    # still waiting: it holds the same commits and more.
+    concurrency:
+      group: package-release-${{ github.repository }}-${{ inputs.directory }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Before the tools, so they are the release commit's.
+      - name: commit
+        id: commit
+        env:
+          DIRECTORY: ${{ inputs.directory }}
+        run: |
+          dir="${DIRECTORY%/}"
+          name="${dir##*/}"
+          if ! [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || [ ! -f "$dir/package.json" ]; then
+            echo "::error::'$DIRECTORY' is not a package's directory: packages/<name>, lowercase, with its package.json."
+            exit 1
+          fi
+          commit=$(git log -1 --format=%H HEAD -- "$dir")
+          git checkout -q --detach "$commit"
+          echo "The last commit to change $dir is $commit."
+          {
+            echo "GIT_CLIFF__GIT__TAG_PATTERN=^$name-v[0-9]+\.[0-9]+\.[0-9]+\$"
+            echo "GIT_CLIFF__BUMP__INITIAL_TAG=$name-v0.1.0"
+          } >> "$GITHUB_ENV"
+          {
+            echo "dir=$dir"
+            echo "name=$name"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: node pnpm git-cliff
+
+      - name: version
+        id: version
+        env:
+          DIR: ${{ steps.commit.outputs.dir }}
+          NAME: ${{ steps.commit.outputs.name }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          releases() { grep -Ex "$NAME-v[0-9]+\.[0-9]+\.[0-9]+"; }
+          tag=$(git tag --points-at HEAD --list "$NAME-v*" --sort=-v:refname | releases | head -n1)
+          if [ -n "$tag" ]; then
+            echo "$COMMIT is $tag already."
+            tagged=true
+          else
+            last=$(git tag --merged HEAD --list "$NAME-v*" --sort=-v:refname | releases | head -n1)
+            tag=$(git cliff --bumped-version --include-path "$DIR/**")
+            if ! [[ "$tag" =~ ^$NAME-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::git-cliff gave '$tag', not a version of $NAME."
+              exit 1
+            fi
+            if [ "$tag" = "$last" ]; then
+              echo "Nothing in $DIR since $last bumps its version: no release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+              echo "::error::The tag $tag exists already, on another commit than $COMMIT."
+              exit 1
+            fi
+            tagged=false
+          fi
+          previous=$(git tag --merged HEAD --list "$NAME-v*" --sort=-v:refname | releases | grep -vxF "$tag" | head -n1)
+          git cliff --include-path "$DIR/**" --tag "$tag" --strip all "${previous:+$previous..}$COMMIT" > "$RUNNER_TEMP/changelog.md"
+          {
+            echo "release=true"
+            echo "tag=$tag"
+            echo "version=${tag#"$NAME"-v}"
+            echo "tagged=$tagged"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: tag
+        if: steps.version.outputs.release == 'true' && steps.version.outputs.tagged == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          git tag "$TAG" "$COMMIT"
+          git push origin "refs/tags/$TAG"
+
+      - name: npm package
+        if: steps.version.outputs.release == 'true'
+        working-directory: ${{ steps.commit.outputs.dir }}
+        env:
+          DIR: ${{ steps.commit.outputs.dir }}
+          NAME: ${{ steps.commit.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAGGED: ${{ steps.version.outputs.tagged }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          package="@$GITHUB_REPOSITORY_OWNER/$NAME"
+          if [ "$(node -p 'require("./package.json").name')" != "$package" ]; then
+            echo "::error file=$DIR/package.json::Its name must be $package: its directory's, in the org's scope."
+            exit 1
+          fi
+          # GitHub Packages links the package to the repo this names, and this
+          # job's token publishes only to its own.
+          repository=$(node -p 'const r = require("./package.json").repository; (typeof r === "string" ? r : r?.url) ?? ""')
+          case "$repository" in
+            *"github.com/$GITHUB_REPOSITORY" | *"github.com/$GITHUB_REPOSITORY.git") ;;
+            *)
+              echo "::error file=$DIR/package.json::Its repository.url must be git+https://github.com/$GITHUB_REPOSITORY.git, not '$repository'."
+              exit 1
+              ;;
+          esac
+          # npm and pnpm expand ${NODE_AUTH_TOKEN} themselves: the token is
+          # never written.
+          # shellcheck disable=SC2016
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
+          theirs=$(npm view "$package@$VERSION" dist.integrity 2> /dev/null || true)
+          if [ -n "$theirs" ] && [ "$TAGGED" = true ]; then
+            echo "$package@$VERSION is published already."
+            exit 0
+          fi
+          pnpm install --frozen-lockfile
+          npm pkg set "version=$VERSION"
+          pnpm run --if-present build
+          pnpm pack --pack-destination "$RUNNER_TEMP/pack"
+          tarball=$(echo "$RUNNER_TEMP"/pack/*.tgz)
+          ours="sha512-$(openssl dgst -sha512 -binary "$tarball" | base64 -w0)"
+          # pnpm packs the same bytes from the same commit, so integrities compare.
+          if [ -n "$theirs" ]; then
+            if [ "$theirs" != "$ours" ]; then
+              echo "::error::$package@$VERSION is published with other contents ($theirs, not $ours)."
+              exit 1
+            fi
+            echo "$package@$VERSION is published already, with these contents."
+            exit 0
+          fi
+          npm publish "$tarball" --ignore-scripts
+          {
+            echo "### Package released"
+            echo
+            echo "\`$package@$VERSION\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Not marked latest: each package has its own, and the repo none.
+      - name: GitHub Release
+        if: steps.version.outputs.release == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { TAG } = process.env;
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: TAG });
+              core.info(`The Release ${TAG} exists already: ${data.html_url}`);
+              return;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
+            const { data } = await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: TAG,
+              name: TAG,
+              body: fs.readFileSync(`${process.env.RUNNER_TEMP}/changelog.md`, 'utf8'),
+              make_latest: 'false',
+            });
+            core.notice(`${TAG}: ${data.html_url}`);
