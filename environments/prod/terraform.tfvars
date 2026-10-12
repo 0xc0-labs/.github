@@ -57,13 +57,20 @@ repositories = {
     visibility  = "private"
     auto_init   = true
   }
+  "packages" = {
+    description = "Shared npm packages, @0xc0-labs/<name>, that every app pins"
+    topics      = ["0xc0", "npm", "typescript"]
+    visibility  = "private"
+    auto_init   = true
+  }
 }
 
-# The repos whose CI needs the network, and the private applications, whose
-# whole CI runs here: their checks, their image, their rc and their release.
+# The repos whose CI needs the network, and the private repos, whose whole CI
+# runs here: their checks, their image, their rc and their release, or their
+# packages' releases.
 runner_group = {
   name         = "0xc0"
-  repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com"]
+  repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com", "packages"]
   workflows = [
     "0xc0-labs/.github/.github/workflows/ansible.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/packer.yml@refs/heads/main",
@@ -73,5 +80,6 @@ runner_group = {
     "0xc0-labs/.github/.github/workflows/container-image.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/release-candidate.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/release.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/package-release.yml@refs/heads/main",
   ]
 }

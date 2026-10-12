@@ -6,6 +6,11 @@
 # Docker: there it builds with the instance's rootless BuildKit, through
 # buildctl (infrastructure, ansible/roles/github_runner/README.md). Every
 # build there starts cold, so its layer cache lives in GHCR, beside the image.
+#
+# Either way the build gets the build secret `npmrc`: a user config for a
+# private @0xc0-labs package, holding the job's own token. The Dockerfile
+# mounts it on its install alone, so it is in no layer (README, Shared
+# packages).
 name: container-image
 
 on:
@@ -70,6 +75,16 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
 
+      # Under RUNNER_TEMP, which the runner empties when the job ends. The
+      # token reads what packages: write lets the job read.
+      - name: npm credentials, for the build alone
+        env:
+          NPM_TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" > "$RUNNER_TEMP/npmrc"
+
       # GitHub's runners: Buildx, with its cache in GitHub's.
       - if: runner.environment == 'github-hosted'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -92,6 +107,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: APP_COMMIT=${{ github.sha }}
+          secret-files: npmrc=${{ runner.temp }}/npmrc
           provenance: mode=max
           sbom: generator=${{ env.SBOM_GENERATOR }}
           cache-from: type=gha
@@ -130,6 +146,7 @@ jobs:
             --opt "filename=$(basename "$FILE")"
             --opt "platform=$PLATFORMS"
             --opt "build-arg:APP_COMMIT=$GITHUB_SHA"
+            --secret "id=npmrc,src=$RUNNER_TEMP/npmrc"
             --opt attest:provenance=mode=max
             --opt "attest:sbom=generator=$SBOM_GENERATOR"
             --import-cache "type=registry,ref=$cache"
