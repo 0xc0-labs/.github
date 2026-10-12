@@ -146,6 +146,25 @@ no service: `payload`'s start their own PostgreSQL from mise, on a Unix socket
 in a temporary directory, with nothing listening on the network. `tools`
 carries what they need: `tools: conda:postgresql`.
 
+With `coverage: true` (it needs `test: true`), the tests run with Vitest's V8
+coverage (`--coverage`, reporters `json-summary` and `text-summary`), and
+`node-check` reports it two ways: a table in the job summary, and on a PR one
+comment with the same table, found by a marker in its body and edited on each
+push. The table has lines, branches, functions and statements, the total and
+each file the PR changes (the push's, on `main`). It never fails on a figure:
+no threshold, and no external coverage service (operator decision,
+2026-10-12; workspace#154: show it first).
+
+- **The repo pins** `@vitest/coverage-v8` at its Vitest's exact version, in its
+  `package.json`, and configures in `vitest.config` what is measured
+  (`coverage.include`, and `coverage.exclude` for tests and generated code):
+  without `include`, only files a test loads show up.
+- **The caller grants** its `check` job `pull-requests: write` besides
+  `packages: read`, or the run fails before it starts. Only the comment job
+  inside `node-check` uses it, on GitHub's runner; the job that runs the code
+  keeps `contents: read`.
+- **A fork's PR** gets the job summary alone: its token is read-only.
+
 Where they run:
 
 - **Every application's checks and image**, public (`offby1.cc`) or private
