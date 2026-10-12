@@ -24,7 +24,7 @@ on:
       tools:
         description: mise tools to install, pinned in the caller's mise.toml.
         type: string
-        default: semgrep
+        default: python uv pipx:semgrep
       sarif:
         description: >-
           Upload the findings to code scanning. For a public repo: a private

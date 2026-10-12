@@ -573,7 +573,7 @@ runs on GitHub's runners, and `--metrics=off` keeps telemetry off.
 - **The engine** is the caller's: `"pipx:semgrep"` pinned in its `mise.toml`,
   with `python` and `uv` pinned beside it, and `mise lock` (`locked = true`
   refuses the install otherwise). The `tools` input names what to install
-  (`semgrep` by default).
+  (`python uv pipx:semgrep` by default).
 - **The rules** are a fixed commit of
   [`semgrep/semgrep-rules`](https://github.com/semgrep/semgrep-rules), the
   `rules-ref` input, never a registry config (`p/...`) that changes between
