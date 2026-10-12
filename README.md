@@ -136,25 +136,33 @@ no service: `payload`'s start their own PostgreSQL from mise, on a Unix socket
 in a temporary directory, with nothing listening on the network. `tools`
 carries what they need: `tools: conda:postgresql`.
 
-Where they run depends on the repo:
+Where they run:
 
-- **A public repo** (`offby1.cc`) runs both on GitHub's runners, the
-  default, with no Vault and no secret. Its build caches in GitHub's cache.
-  Its release alone runs on the self-hosted runners, the one job that logs
-  in to Vault, so its repo is in `runner_group.repositories`. Its logs are
-  public, that job's too: the runner's name and Vault's address show, as in
-  this repo's own runs, and every token, and every value read from Vault, is
-  masked.
-- **A private repo** (`payload`, `artistlabco.com`) runs its whole CI on
-  the self-hosted runners: `runs-on: '{"group": "0xc0", "labels": "0xc0"}'`,
-  and its repo in `runner_group.repositories`. The image is built by the
-  instance's rootless BuildKit, which starts empty for every job, so the
-  layer cache lives in GHCR beside the image (`:buildcache`), written by
-  `main`'s builds alone. Only its rc and release jobs log in to Vault; its
-  checks and its image never get `id-token: write`.
+- **Every application's checks and image**, public (`offby1.cc`) or private
+  (`payload`, `artistlabco.com`), run on GitHub's runners, the default of
+  both workflows: the caller passes no `runs-on`. Neither logs in to Vault,
+  nor gets `id-token: write`. The build caches in GitHub's cache.
+- **Every application's rc and release**, a private one's or a public one's
+  (`offby1.cc`'s release), run on the self-hosted runners, the `0xc0` group:
+  they log in to Vault, which only the CI VMs reach. `release-candidate` and
+  `release` default to that group, and are the only jobs of the application
+  that take it: its repo is in `runner_group.repositories` for them. A
+  public repo's logs are public, those jobs' too: the runner's name and
+  Vault's address show, as in this repo's own runs, and every token, and
+  every value read from Vault, is masked.
 
-Either way the build carries a `mode=max` provenance and an SBOM, from a
-scanner image pinned by digest.
+Why a private application's checks and image left the CI VMs (operator
+decision, 2026-10-12; workspace#138): two Next.js builds at once hung a CI
+VM, whose 2 vCPU and 4 GB its two runners share, and blocked CI for about 35
+minutes (infrastructure#235), and the node has no memory left to give them
+(62 GB, 60 allocated). A private repo's GitHub runner has 2 CPU and 8 GB to
+itself. The cost is GitHub Free's 2,000 minutes a month, shared by the org's
+private repos: once they run out, their jobs on GitHub's runners are
+blocked, not billed. `payload` used about 320 from 2026-10-01 to 10-12. The
+rc and release, on the CI VMs, use none of them.
+
+The build carries a `mode=max` provenance and an SBOM, from a scanner image
+pinned by digest.
 
 The delivery, for an application with staging (`gitops`' `apps/<app>/staging/`
 and `apps/<app>/prod/`, each with its pin):
@@ -245,16 +253,12 @@ jobs:
       contents: read
       packages: read
     uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
-    with:
-      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
   image:
     needs: check
     permissions:
       contents: read
       packages: write
     uses: 0xc0-labs/.github/.github/workflows/container-image.yml@main
-    with:
-      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
   rc:
     needs: image
     if: github.event_name == 'push'

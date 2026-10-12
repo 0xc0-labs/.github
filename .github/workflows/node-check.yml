@@ -11,11 +11,11 @@ on:
         default: .
       runs-on:
         description: >-
-          Where the job runs, as JSON. GitHub's runners by default, for a
-          public repo; '{"group": "0xc0", "labels": "0xc0"}' for the
-          self-hosted runners, which a private application runs on, once
-          the runner group admits its repo. A PR from a fork always runs on
-          "ubuntu-latest", never on the self-hosted ones.
+          Where the job runs, as JSON. GitHub's runners by default, where
+          every application runs it, public or private (README, Application
+          repos); '{"group": "0xc0", "labels": "0xc0"}' for the self-hosted
+          runners, once the runner group admits the repo. A PR from a fork
+          always runs on "ubuntu-latest", never on the self-hosted ones.
         type: string
         default: '"ubuntu-latest"'
       tools:
