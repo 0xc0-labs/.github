@@ -38,9 +38,34 @@ on:
           the job needs comes from here.
         type: string
         default: ""
+      skip-paths:
+        description: Globs added to the paths that never cause an apply (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause an apply, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 jobs:
+  # Only the central list: a root's inputs reach beyond environments/ and
+  # modules/, and the apply re-plans anyway.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   tofu:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # A fork could call this from a PR of its own: GitHub's runners, no secrets.
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     environment: ${{ inputs.environment }}

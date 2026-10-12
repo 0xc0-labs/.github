@@ -17,12 +17,38 @@ on:
         description: mise tools to install, pinned in the caller's mise.toml.
         type: string
         default: yq
+      skip-paths:
+        description: Globs added to the paths that never cause a check (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a check, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
+  # Under the pins. A bot's PR is always checked: what the bot may change is
+  # what its checks guard, so a change outside the pins must reach them.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          paths: ${{ inputs.pins }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   check:
+    needs: changes
+    if: needs.changes.outputs.run == 'true' || (github.event_name == 'pull_request' && contains(fromJSON('["0xc0-labs-promoter[bot]", "0xc0-labs-renovate[bot]"]'), github.event.pull_request.user.login))
     runs-on: ubuntu-latest
     env:
       PINS: ${{ inputs.pins }}

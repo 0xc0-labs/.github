@@ -9,12 +9,35 @@ on:
         description: The test runner to execute, relative to the repo root. It exits non-zero on any failing case.
         type: string
         default: plugins/0xc0/hooks/tests/run.sh
+      skip-paths:
+        description: Globs added to the paths that never cause a run (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a run, even where the central list ignores them. The default command's cases read the plugins' skills, which are markdown.
+        type: string
+        default: plugins/**
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -28,6 +28,14 @@ on:
           always runs on "ubuntu-latest", never on the self-hosted ones.
         type: string
         default: '"ubuntu-latest"'
+      skip-paths:
+        description: Globs added to the paths that never cause a build (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a build, even where the central list ignores them, such as markdown the image copies in (README, Path gates).
+        type: string
+        default: ''
     outputs:
       image:
         description: The image's name, with no tag.
@@ -46,7 +54,24 @@ env:
   SBOM_GENERATOR: docker.io/docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
 
 jobs:
+  # Under the build context, and the Dockerfile: README, Path gates.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          paths: ${{ inputs.context != '.' && format('{0}/** {1}', inputs.context, inputs.file) || '' }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   image:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # Fork PRs run on GitHub's runners, never in the network.
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     # The same group as node-check's job (README, Concurrency).

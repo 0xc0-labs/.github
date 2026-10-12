@@ -52,6 +52,14 @@ on:
           the build needs comes from here.
         type: string
         default: ""
+      skip-paths:
+        description: Globs added to the paths that never cause work (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause work, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 # id-token: for the Vault login; the caller grants it even without Vault.
 permissions:
@@ -59,8 +67,22 @@ permissions:
   id-token: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   validate:
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     env:
       TEMPLATES_DIR: ${{ inputs.templates-dir }}
@@ -88,7 +110,8 @@ jobs:
 
   # A change outside a template's directory and the roles rebuilds them all.
   select:
-    if: github.event_name == 'push'
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       chains: ${{ steps.select.outputs.chains }}

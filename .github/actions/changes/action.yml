@@ -1,0 +1,42 @@
+name: changes
+description: >-
+  Whether a push, a PR or a merge group changed anything a workflow cares
+  about. Reads the changed files from GitHub, so it needs no checkout
+  (README, Path gates).
+
+inputs:
+  paths:
+    description: Globs, whitespace-separated. When set, only a change to one of them counts, besides the central list's ignores.
+    default: ''
+  paths-regex:
+    description: An extended regex. When set, only a path it matches counts.
+    default: ''
+  skip-paths:
+    description: Globs added to the ones that never cause work.
+    default: ''
+  work-paths:
+    description: Globs that always cause work, even where the central list ignores them.
+    default: ''
+  token:
+    description: Token that reads the repo's commits.
+    default: ${{ github.token }}
+
+outputs:
+  run:
+    description: "'true' when the work must run, 'false' when its jobs are skipped."
+    value: ${{ steps.decide.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - id: decide
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        ACTION_PATH: ${{ github.action_path }}
+        IGNORE_FILE: ${{ github.action_path }}/ignore.txt
+        PATHS: ${{ inputs.paths }}
+        PATHS_REGEX: ${{ inputs.paths-regex }}
+        SKIP_PATHS: ${{ inputs.skip-paths }}
+        WORK_PATHS: ${{ inputs.work-paths }}
+      run: bash "$ACTION_PATH/changes.sh"

@@ -25,12 +25,35 @@ on:
         description: mise tools to install, pinned in the caller's mise.toml.
         type: string
         default: python uv pipx:semgrep
+      skip-paths:
+        description: Globs added to the paths that never cause a scan (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a scan, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   scan:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}

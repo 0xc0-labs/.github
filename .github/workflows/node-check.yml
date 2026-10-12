@@ -30,13 +30,39 @@ on:
           themselves; the tools they need go in `tools`.
         type: boolean
         default: false
+      skip-paths:
+        description: Globs added to the paths that never cause a check (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a check, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 permissions:
   contents: read
   packages: read
 
 jobs:
+  # Under working-directory, and the repo-root files that decide what it
+  # installs: README, Path gates.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          paths: ${{ inputs.working-directory != '.' && format('{0}/** mise.toml mise.lock .mise/** pnpm-lock.yaml pnpm-workspace.yaml .npmrc', inputs.working-directory) || '' }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   check:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     # The same group as container-image's job, so a caller's image job needs
     # its check job (README, Concurrency).

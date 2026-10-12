@@ -14,12 +14,37 @@ on:
         description: The marketplace file, relative to the repo root.
         type: string
         default: .claude-plugin/marketplace.json
+      skip-paths:
+        description: Globs added to the paths that never cause a check (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a check, besides the plugins and the marketplace file (README, Path gates).
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
+  # A plugin's markdown is the plugin: its skills change it as code does.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main
+        with:
+          paths: ${{ format('{0}/** {1}', inputs.plugins, inputs.marketplace) }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ format('{0}/** {1} {2}', inputs.plugins, inputs.marketplace, inputs.work-paths) }}
+
   check:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
