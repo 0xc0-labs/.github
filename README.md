@@ -466,7 +466,8 @@ installing the `0xc0` plugin on each machine, are in `claude-config`'s
 
 ## Concurrency
 
-Several PRs can plan, and several merges can apply, against the same state.
+Several PRs can plan, and several merges can apply, against the same state,
+and every push to a PR runs its checks again.
 
 - **Plans**: one at a time per PR and root. A newer push replaces a plan that
   has not started; a running plan is never cancelled, because killing tofu
@@ -480,6 +481,19 @@ Several PRs can plan, and several merges can apply, against the same state.
   10 for CI applies.
 - **Stale PR plans** — PR B planned before PR A merged — are stopped by the
   ruleset requiring branches to be up to date.
+- **An application's checks**, `node-check` and `container-image`: one run
+  per PR. A newer push to a PR cancels its older run's check or image job,
+  whichever is running, and frees that runner. A run on `main` is never
+  cancelled, nor any run but a PR's: each `main` commit gets its own release
+  candidate. The `concurrency` lives in the two reusable workflows, not in
+  their callers (#113): a called workflow's `github` context is its
+  caller's, so the group is the caller's workflow and PR, and no caller adds
+  any. Both jobs share that group, so a caller's `image` job `needs` its
+  `check`, as in Application repos' example: started side by side on a PR,
+  the later would cancel the other.
+- **Timeouts**: each of those jobs stops well above its usual time, under 5
+  minutes, so a hung one frees its runner long before GitHub's default 6
+  hours. The image's is the longer: a cold build cache rebuilds every layer.
 
 ## Secrets
 
