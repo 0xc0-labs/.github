@@ -49,6 +49,11 @@ jobs:
   image:
     # Fork PRs run on GitHub's runners, never in the network.
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
+    # The same group as node-check's job (README, Concurrency).
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 30
     outputs:
       image: ghcr.io/${{ github.repository }}
       digest: ${{ steps.build.outputs.digest || steps.buildctl.outputs.digest }}
