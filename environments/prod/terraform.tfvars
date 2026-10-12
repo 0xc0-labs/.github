@@ -7,7 +7,7 @@ repositories = {
     description            = "Organization Terraform, reusable workflows and org-wide templates"
     topics                 = ["0xc0", "opentofu", "github-actions"]
     production_environment = true
-    required_checks        = ["issue / check", "plan / tofu"]
+    required_checks        = ["issue / check", "plan / tofu", "semgrep / scan"]
   }
   "workspace" = {
     description = "Umbrella workspace: cross-repo rules, design and bootstrap"
@@ -16,18 +16,20 @@ repositories = {
   "claude-config" = {
     description     = "Claude Code marketplace and the 0xc0 plugin"
     topics          = ["0xc0", "claude-code"]
-    required_checks = ["issue / check"]
+    required_checks = ["issue / check", "semgrep / scan"]
   }
   "infrastructure" = {
     description            = "Packer, OpenTofu and Ansible for the Proxmox node"
     topics                 = ["0xc0", "proxmox", "opentofu", "packer", "ansible"]
     production_environment = true
-    required_checks        = ["issue / check", "plan / tofu"]
+    required_checks        = ["issue / check", "plan / tofu", "semgrep / scan"]
   }
   "gitops" = {
     description = "ArgoCD manifests for the cluster"
     topics      = ["argocd", "0xc0"]
     # validate.yml runs both of its jobs on every PR, with no paths filter.
+    # Not "semgrep / scan" yet: its caller does not trigger on merge_group, so
+    # the queue would wait on it for ever (.github#126).
     required_checks = ["issue / check", "validate / validate", "pin / check"]
     # Staging's promotion PRs merge themselves, once these pass; prod's never do.
     allow_auto_merge = true
@@ -38,13 +40,13 @@ repositories = {
     topics                 = ["0xc0", "opentofu", "vault"]
     auto_init              = true
     production_environment = true
-    required_checks        = ["issue / check", "plan / tofu"]
+    required_checks        = ["issue / check", "plan / tofu", "semgrep / scan"]
   }
   "offby1.cc" = {
     description     = "Landing page for offby1.cc"
     topics          = ["0xc0", "app", "nextjs"]
     auto_init       = true
-    required_checks = ["issue / check", "check / check", "image / image"]
+    required_checks = ["issue / check", "check / check", "image / image", "semgrep / scan"]
   }
   "artistlabco.com" = {
     description = "Website for artistlabco.com"
