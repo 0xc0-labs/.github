@@ -70,7 +70,7 @@ repositories = {
 # packages' releases.
 runner_group = {
   name         = "0xc0"
-  repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com", "packages"]
+  repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com", "packages", "offby1.cc"]
   workflows = [
     "0xc0-labs/.github/.github/workflows/ansible.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/packer.yml@refs/heads/main",
