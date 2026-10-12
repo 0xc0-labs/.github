@@ -54,7 +54,7 @@ jobs:
       run: ${{ steps.changes.outputs.run }}
     steps:
       - id: changes
-        uses: 0xc0-labs/.github/.github/actions/changes@main
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
         with:
           paths: ${{ inputs.working-directory != '.' && format('{0}/** mise.toml mise.lock .mise/** pnpm-lock.yaml pnpm-workspace.yaml .npmrc', inputs.working-directory) || '' }}
           skip-paths: ${{ inputs.skip-paths }}
