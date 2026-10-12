@@ -1,6 +1,7 @@
 # Reusable: run the Ansible playbooks a change affects, one job each. A PR runs
-# --check --diff as the review; a push to main runs for real once the operator
-# approves the environment, which is the human launching the run.
+# the caller's ansible-lint, then --check --diff as the review; a push to main
+# runs for real once the operator approves the environment, which is the human
+# launching the run.
 name: ansible
 
 on:
@@ -24,6 +25,12 @@ on:
         description: Directory holding playbooks/ and roles/, relative to the repo root, where the wrapper runs them.
         type: string
         default: ansible
+      lint:
+        description: >-
+          Command that runs ansible-lint in ansible-dir, at the version the
+          caller pins, on a PR before any playbook runs. Empty skips it.
+        type: string
+        default: uv run --frozen --group lint ansible-lint --profile=production
       tofu-root:
         description: OpenTofu root to initialise first, when the wrapper reads its outputs. Empty skips it.
         type: string
@@ -122,9 +129,32 @@ jobs:
           if [ "${#selected[@]}" = 0 ]; then echo "No playbook is affected by this change."; else printf 'Runs: %s\n' "${selected[@]}"; fi
           echo "playbooks=$(printf '%s\n' "${selected[@]}" | jq -Rsc 'split("\n") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
 
+  # The whole ansible-dir, whichever playbooks the change affects. Only on a
+  # PR: what reaches main was linted on its PR.
+  lint:
+    if: github.event_name == 'pull_request' && inputs.lint != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: ${{ inputs.tools }}
+
+      - name: ansible-lint
+        working-directory: ${{ inputs.ansible-dir }}
+        env:
+          LINT: ${{ inputs.lint }}
+        run: eval "$LINT"
+
   ansible:
-    needs: select
-    if: needs.select.outputs.playbooks != '[]'
+    needs: [select, lint]
+    # A job whose needs include a skipped one is skipped too, unless its
+    # condition calls a status function; lint is skipped on a push.
+    if: >-
+      ${{ !cancelled() && needs.select.result == 'success'
+      && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
+      && needs.select.outputs.playbooks != '[]' }}
     # Each playbook holds its own hosts, so a failure does not stop the others.
     strategy:
       fail-fast: false
