@@ -502,6 +502,57 @@ of its own.
    a dependency's code included, would hold gh's token, which reaches far
    more than packages.
 
+### A repo with a merge queue
+
+A ruleset that requires checks requires a branch to be up to date before
+it merges, and auto-merge never updates one: a PR set to merge itself that another merge
+overtakes waits for someone to update it. A merge queue does it instead. It
+builds each queued PR on top of the latest `main`, and of the PRs ahead of
+it, as a commit on a temporary `gh-readonly-queue/main/...` branch, runs the
+required checks on that commit, and merges it; a PR that conflicts, or fails
+there, leaves the queue. It is for a repo whose PRs merge themselves, as
+`gitops`' staging promotions do (workspace#139).
+
+The queue waits forever for a required check that does not report on its
+`merge_group` event. So every caller of a required check also triggers on
+it, with the same jobs: the check's name, `<caller job> / <reusable job>`, is
+the same on both events.
+
+```yaml
+# .github/workflows/issue.yml, of a repo with a merge queue
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  merge_group:
+    types: [checks_requested]
+
+permissions: {}
+
+jobs:
+  issue:
+    uses: 0xc0-labs/.github/.github/workflows/pr-issue.yml@main
+```
+
+On a merge group, a check that reads files reads its commit, the event's,
+which `actions/checkout` takes by default:
+
+- `kustomize-validate` validates it as on a PR.
+- `pin-check` checks its pins. Its rules for the org's bots read a PR's own
+  diff, which a merge group does not have: they run on the PR, and a queue
+  takes a PR only once its required checks pass.
+- `pr-issue` passes it, for the same reason: each of its PRs passed it.
+
+`release-candidate` sets staging's PR to merge itself, with the same call
+as without a queue: with one, GitHub enqueues the PR once its checks pass,
+or at once if they have, and the queue merges it with the ruleset's method,
+not the one the call names. A PR already queued is left as it is. When
+GitHub answers that nothing is left to wait for, the PR is enqueued, not
+merged: the REST merge refuses a branch that requires a queue.
+
+The callers come first, the ruleset's queue last: a queue that requires a
+check its callers do not yet report on `merge_group` blocks every merge.
+Then a person merges with "Merge when ready", which queues the PR.
+
 ## Bootstrap
 
 This repo creates every repo in the org, itself included, so the first run
