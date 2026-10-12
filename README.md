@@ -478,10 +478,19 @@ of its own.
 
 5. **A developer's machine, and a session's worktree**: pnpm takes the token
    from the user's config, outside every checkout, so a worktree under
-   `.worktrees/` needs nothing of its own. A repo's `.npmrc` would put it in
-   git, and a `mise.local.toml` is missing from a fresh worktree. Once per
-   machine, gh's token gets the scope, and `~/.npmrc` a reference to it, not
-   the token:
+   `.worktrees/` needs nothing of its own. The line cannot go in the app's
+   `.npmrc`, though it holds a variable's name and not the token: pnpm 12
+   refuses it there (tried at 12.8.1, the apps' pin; #124):
+
+   ```
+   [WARN] Ignored project-level auth setting "//npm.pkg.github.com/:_authToken":
+   environment variables are not expanded in repository-controlled registry credentials.
+   ```
+
+   and the install then fails with a 401 for the package's tarball. Only the
+   user's config takes an auth line with a variable, and a `mise.local.toml`
+   is missing from a fresh worktree. Once per machine, gh's token gets the
+   scope, and `~/.npmrc` a reference to it, not the token:
 
    ```sh
    gh auth refresh -h github.com -s read:packages
