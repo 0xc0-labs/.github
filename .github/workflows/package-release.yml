@@ -17,9 +17,10 @@ on:
         required: true
       runs-on:
         description: >-
-          Where the job runs, as JSON. GitHub's runners by default;
-          '{"group": "0xc0", "labels": "0xc0"}' for the self-hosted runners,
-          which a private repo runs on, once the runner group admits it.
+          Where the job runs, as JSON. GitHub's runners by default, where
+          packages runs it (README, Shared packages); '{"group": "0xc0",
+          "labels": "0xc0"}' for the self-hosted runners, once the runner
+          group admits the repo.
         type: string
         default: '"ubuntu-latest"'
 

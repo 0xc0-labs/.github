@@ -65,10 +65,11 @@ repositories = {
   }
 }
 
-# The repos whose CI needs the network, and the private repos' jobs that run
-# here: an application's rc and release, which log in to Vault, and packages'
-# checks and releases. A private application's checks and image run on
-# GitHub's runners (README, Application repos).
+# The repos whose CI needs the network, and the applications' jobs that run
+# here: their rc and release, which log in to Vault. Every other job, an
+# application's or packages', runs on GitHub's runners (README); packages,
+# and the workflows those jobs call, stay listed as the fallback should
+# GitHub's free minutes run out (workspace#138).
 runner_group = {
   name         = "0xc0"
   repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com", "packages", "offby1.cc"]
