@@ -30,6 +30,14 @@ on:
           themselves; the tools they need go in `tools`.
         type: boolean
         default: false
+      coverage:
+        description: >-
+          Run the tests with Vitest's V8 coverage and report it in the job
+          summary and, on a PR, in one comment. Needs `test: true`, and the
+          caller granting `pull-requests: write` (README, Application repos).
+          Never fails on a figure.
+        type: boolean
+        default: false
       skip-paths:
         description: Globs added to the paths that never cause a check (README, Path gates).
         type: string
@@ -102,4 +110,73 @@ jobs:
 
       - name: test
         if: inputs.test
-        run: pnpm test
+        env:
+          COVERAGE: ${{ inputs.coverage }}
+        run: |
+          if [ "$COVERAGE" = true ]; then
+            pnpm test --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+          else
+            pnpm test
+          fi
+
+      # The comment is coverage-comment's, a workflow of its own: this one
+      # asks its caller for no new permission. File names come from the PR:
+      # they reach the script only through files and the environment.
+      - name: coverage
+        id: coverage
+        if: inputs.test && inputs.coverage
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/coverage-report"
+          changed="$RUNNER_TEMP/changed.txt"
+          : > "$changed"
+          if [ -n "${BASE_SHA//0/}" ] && git fetch --quiet --depth=1 origin "$BASE_SHA" 2> /dev/null; then
+            git diff --name-only "$BASE_SHA" HEAD > "$changed"
+          fi
+          CHANGED_LIST="$changed" node --input-type=module <<'EOF'
+          import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+          import { relative, resolve } from 'node:path'
+
+          const summaryFile = 'coverage/coverage-summary.json'
+          if (!existsSync(summaryFile)) {
+            console.log('::warning::no coverage summary: is @vitest/coverage-v8 pinned? (README, node-check)')
+            process.exit(0)
+          }
+          const summary = JSON.parse(readFileSync(summaryFile, 'utf8'))
+          const root = process.env.GITHUB_WORKSPACE
+          const changed = new Set(readFileSync(process.env.CHANGED_LIST, 'utf8').split('\n').filter(Boolean))
+          const cell = (m) => `${m.pct}% (${m.covered}/${m.total})`
+          const row = (name, d) => `| ${name} | ${cell(d.lines)} | ${cell(d.branches)} | ${cell(d.functions)} | ${cell(d.statements)} |`
+          const clean = (name) => name.replace(/[`|\r\n]/g, '?')
+
+          const files = Object.entries(summary)
+            .filter(([name]) => name !== 'total')
+            .map(([name, data]) => [relative(root, resolve(name)), data])
+            .filter(([name]) => changed.has(name))
+            .sort(([a], [b]) => a.localeCompare(b))
+          const shown = files.slice(0, 50)
+
+          const lines = [
+            '### Test coverage',
+            '',
+            '| | Lines | Branches | Functions | Statements |',
+            '|---|---|---|---|---|',
+            row('**Total**', summary.total),
+            ...shown.map(([name, data]) => row('`' + clean(name) + '`', data)),
+          ]
+          if (files.length > shown.length) lines.push('', `${files.length - shown.length} more changed files not shown.`)
+          if (files.length === 0) lines.push('', 'No changed file is measured.')
+          const report = lines.join('\n')
+
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`)
+          writeFileSync(`${process.env.RUNNER_TEMP}/coverage-report/report.md`, report)
+          EOF
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.test && inputs.coverage
+        with:
+          name: coverage-report
+          path: ${{ runner.temp }}/coverage-report/report.md
+          if-no-files-found: ignore
+          retention-days: 7
