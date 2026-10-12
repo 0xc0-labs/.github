@@ -56,6 +56,6 @@ operator's approval. Logs, metrics and traces go to OpenObserve.
   pinned per repo with mise. The host's base services are the one exception.
 - **One source of truth per concern.** The design is closed in
   [`docs/design.md`](https://github.com/0xc0-labs/workspace/blob/main/docs/design.md);
-  the network in the infrastructure code, `terraform.tfvars`; the state of work on the
-  [project board](https://github.com/orgs/0xc0-labs/projects/1).
+  the network in the infrastructure code, `terraform.tfvars`; the state of
+  work on the org's project board.
 - **A human applies.** Automation plans; the operator approves.

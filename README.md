@@ -308,13 +308,9 @@ How its `main` gets its first commit decides the rest:
   throughout. If its CI needs secrets, it gets a `ci/<repo>/` path, a policy
   and a JWT role in the `vault` repo.
 
-The module creates no files in the repo. The `0xc0` Claude Code plugin is
-installed per machine, from the workspace, and enabling it in settings does
-not install it:
-
-```
-claude plugin install 0xc0@0xc0-labs --scope project
-```
+The module creates no files in the repo. Its `.claude/settings.json`, and
+installing the `0xc0` plugin on each machine, are in `claude-config`'s
+[Installing](https://github.com/0xc0-labs/claude-config#installing).
 
 ## Concurrency
 
