@@ -418,10 +418,16 @@ of its own.
    //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
    ```
 
-   Then the shell that installs exports
-   `NODE_AUTH_TOKEN="$(gh auth token)"`. Exported from the operator's
-   profile, with gh on its PATH there, it reaches every Claude Code
-   session too, whose shell starts from that profile.
+   Then each install, a person's or a session's, gets the token for that
+   command alone:
+
+   ```sh
+   NODE_AUTH_TOKEN="$(gh auth token)" pnpm install
+   ```
+
+   Never exported from a profile or a `mise.toml`: every process under it,
+   a dependency's code included, would hold gh's token, which reaches far
+   more than packages.
 
 ## Bootstrap
 

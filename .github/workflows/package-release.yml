@@ -1,22 +1,9 @@
-# Reusable: release one package of a monorepo on a push to main, so merged
-# is published. What changed in its directory since its last release becomes
-# @<owner>/<name>@X.Y.Z on GitHub Packages, the tag <name>-vX.Y.Z, and a
-# GitHub Release with the changelog. A package with nothing new is skipped.
-# The versioning scheme is in the README, Shared packages.
+# Reusable: on a push to main, release one package of a monorepo when its
+# directory has something new (README, Shared packages).
 #
 # The release is the last commit that changed the directory, not the push's:
 # git-cliff, filtering commits by path, does not see a tag on a commit outside
-# it, and would count the same commits again. The package is built there, with
-# that commit's lockfile and tools.
-#
-# A failed run can be rerun, and finishes what the first left undone, as in
-# release-candidate.yml: the tag, the npm version and the GitHub Release are
-# each skipped when they are there. pnpm packs the same bytes from the same
-# commit, so a version this run did not expect to find published is compared
-# with what it packs, and fails the run when it differs.
-#
-# node, pnpm and git-cliff come from the caller's mise.toml. The job's own
-# GITHUB_TOKEN publishes: no Vault, no secret.
+# it, and would count the same commits again.
 name: package-release
 
 on:
@@ -88,9 +75,6 @@ jobs:
         with:
           install_args: node pnpm git-cliff
 
-      # The commit's own release tag, if a run made it already; otherwise the
-      # version git-cliff computes from the directory's commits since the last
-      # release, if they bump it.
       - name: version
         id: version
         env:
@@ -181,6 +165,7 @@ jobs:
           pnpm pack --pack-destination "$RUNNER_TEMP/pack"
           tarball=$(echo "$RUNNER_TEMP"/pack/*.tgz)
           ours="sha512-$(openssl dgst -sha512 -binary "$tarball" | base64 -w0)"
+          # pnpm packs the same bytes from the same commit, so integrities compare.
           if [ -n "$theirs" ]; then
             if [ "$theirs" != "$ours" ]; then
               echo "::error::$package@$VERSION is published with other contents ($theirs, not $ours)."
