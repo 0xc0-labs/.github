@@ -11,10 +11,17 @@ jobs:
     steps:
       - name: linked issue
         env:
+          EVENT: ${{ github.event_name }}
           # Read from the environment, never interpolated into the script.
           BODY: ${{ github.event.pull_request.body }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
+          # A PR joins a merge queue only once its required checks pass, this
+          # one included (README, A repo with a merge queue).
+          if [ "$EVENT" = merge_group ]; then
+            echo "A merge group: each of its PRs passed this check."
+            exit 0
+          fi
           # A login ending in [bot] belongs to a GitHub App: no person can
           # register one.
           case "$AUTHOR" in

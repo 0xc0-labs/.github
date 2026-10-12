@@ -27,6 +27,8 @@ jobs:
     env:
       PINS: ${{ inputs.pins }}
       OWNER: ${{ github.repository_owner }}
+      # The bot's checks read a PR's own diff: a merge group has none, and
+      # each of its PRs passed them already. Its commit gets the pins alone.
       BOT: ${{ github.event_name == 'pull_request' && contains(fromJSON('["0xc0-labs-promoter[bot]", "0xc0-labs-renovate[bot]"]'), github.event.pull_request.user.login) }}
     steps:
       # Before anything from the PR's branch is checked out or installed. The

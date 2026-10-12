@@ -320,18 +320,34 @@ jobs:
               await github.rest.git.deleteRef({ owner, repo, ref: `heads/${old.head.ref}` });
             }
 
-            if (AUTO_MERGE === 'true' && pr.auto_merge) {
+            if (AUTO_MERGE !== 'true') return;
+            const { node: state } = await github.graphql(
+              `query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { enabledAt } isInMergeQueue isMergeQueueEnabled } } }`,
+              { id: pr.node_id },
+            );
+            if (state.autoMergeRequest || state.isInMergeQueue) {
               core.info(`#${pr.number} is set to merge itself already.`);
-            } else if (AUTO_MERGE === 'true') {
-              try {
+              return;
+            }
+            // With a merge queue, this enqueues a PR whose checks passed, and
+            // the queue's own merge method applies (README, A repo with a
+            // merge queue).
+            try {
+              await github.graphql(
+                `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }`,
+                { id: pr.node_id },
+              );
+            } catch (e) {
+              // GitHub refuses auto-merge on a PR with nothing left to wait
+              // for: merge it now. The REST merge refuses a branch that
+              // requires a merge queue.
+              if (!/clean status/i.test(e.message)) throw e;
+              if (state.isMergeQueueEnabled) {
                 await github.graphql(
-                  `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }`,
-                  { id: pr.node_id },
+                  `mutation($id: ID!, $sha: GitObjectID!) { enqueuePullRequest(input: { pullRequestId: $id, expectedHeadOid: $sha }) { clientMutationId } }`,
+                  { id: pr.node_id, sha: pr.head.sha },
                 );
-              } catch (e) {
-                // GitHub refuses auto-merge on a PR with nothing left to wait
-                // for: merge it now.
-                if (!/clean status/i.test(e.message)) throw e;
+              } else {
                 await github.rest.pulls.merge({ owner, repo, pull_number: pr.number, merge_method: 'squash' });
               }
             }
