@@ -7,11 +7,8 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   semgrep:
     # This repo's own copy, so a PR tests the workflow it changes.
     uses: ./.github/workflows/semgrep.yml
-    with:
-      sarif: true
