@@ -1,5 +1,6 @@
 # Reusable: by hand, release the rc staging runs, or the rc named, and offer
-# it to prod in gitops (README, Application repos). Tools, Vault and most
+# it to prod in gitops; for an app with no staging, release each commit pushed
+# to main, after its image (README, Application repos). Tools, Vault and most
 # steps as in release-candidate.yml.
 name: release
 
@@ -32,11 +33,22 @@ on:
           on.
         type: string
         default: ""
+      staging:
+        description: >-
+          False for an app with no staging, called on every push to main
+          after the image job: the commit pushed is the release, its version
+          from git-cliff and its digest from the image's sha-<7> tag. No rc,
+          and nothing read from staging; rc stays empty.
+        type: boolean
+        default: true
 
 env:
   VAULT_ADDR: https://vault.int.0xc0.cc
-  # As release-candidate.yml: only a release is the previous version.
+  # As release-candidate.yml: only a release is the previous version, and with
+  # no staging the version is bumped as an rc's is.
   GIT_CLIFF__GIT__TAG_PATTERN: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+  GIT_CLIFF__BUMP__INITIAL_TAG: v0.1.0
+  GIT_CLIFF__BUMP__BREAKING_ALWAYS_BUMP_MAJOR: "false"
 
 jobs:
   release:
@@ -46,6 +58,8 @@ jobs:
       contents: write # the release's tag and the GitHub Release
       packages: write # the image's tag and the npm package
       id-token: write # the Vault login
+    # One release at a time per repo, in order. With no staging, a newer push
+    # replaces one still waiting: its release includes that commit.
     concurrency:
       group: release-${{ github.repository }}
       cancel-in-progress: false
@@ -77,15 +91,26 @@ jobs:
           auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/docker/config.json"
 
-      - name: rc
-        id: rc
+      - name: image
+        id: image
         working-directory: _gitops
         env:
+          STAGING: ${{ inputs.staging }}
           RC: ${{ inputs.rc }}
         run: |
           mise trust --quiet
           mise install yq
-          if [ -n "$RC" ]; then
+          if [ "$STAGING" != true ]; then
+            if [ -n "$RC" ]; then
+              echo "::error::The rc input is '$RC', but an app with no staging has no rc."
+              exit 1
+            fi
+            image="$IMAGE:sha-${GITHUB_SHA::7}"
+            digest=$(crane digest "$image") ||
+              { echo "::error::No image $image: the image job runs first."; exit 1; }
+            rc=""
+            echo "No staging: the release is $GITHUB_SHA, $digest."
+          elif [ -n "$RC" ]; then
             if ! [[ "$RC" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
               echo "::error::The rc input is '$RC', not vX.Y.Z-rc.N."
               exit 1
@@ -114,30 +139,63 @@ jobs:
             echo "digest=$digest"
           } >> "$GITHUB_OUTPUT"
 
-      # The release is the rc's commit, checked out for what follows. Its
-      # changelog runs from the release before it, whether or not a rerun
-      # finds this release's tag on the commit already.
+      # The release is the rc's commit, or with no staging the commit pushed,
+      # checked out for what follows. Its changelog runs from the release
+      # before it, whether or not a rerun finds this release's tag on the
+      # commit already. With no staging, a commit that a later release
+      # contains, or whose commits git-cliff does not count, releases nothing.
       - name: version
         id: version
         env:
-          RC: ${{ steps.rc.outputs.rc }}
+          RC: ${{ steps.image.outputs.rc }}
         run: |
-          commit=$(git rev-parse -q --verify "refs/tags/$RC^{commit}") ||
-            { echo "::error::No tag $RC in this repo."; exit 1; }
-          version="${RC%-rc.*}"
+          releases() { git tag "$@" --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V; }
+          if [ -n "$RC" ]; then
+            commit=$(git rev-parse -q --verify "refs/tags/$RC^{commit}") ||
+              { echo "::error::No tag $RC in this repo."; exit 1; }
+            version="${RC%-rc.*}"
+          else
+            commit=$GITHUB_SHA
+            version=$(releases --points-at "$commit" | tail -n1)
+            if [ -n "$version" ]; then
+              echo "This commit is $version already."
+            else
+              latest=$(releases | tail -n1)
+              if [ -n "$latest" ] && git merge-base --is-ancestor "$commit" "$latest"; then
+                echo "::notice::$latest, released from a later commit, contains this one: nothing to release."
+                echo "release=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              version=$(git cliff --bumped-version)
+              version="v${version#v}"
+              if [ "$version" = "$latest" ]; then
+                echo "::notice::Nothing to release: git-cliff counts no commit since $latest."
+                echo "release=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+                echo "::error::git-cliff gave '$version', not a version that has no release yet."
+                exit 1
+              fi
+            fi
+          fi
+          newest=$({ releases; echo "$version"; } | sort -V | tail -n1)
           git checkout -q --detach "$commit"
           previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' "$commit^" 2> /dev/null || true)
           git cliff --tag "$version" --strip all "${previous:+$previous..}$commit" > "$RUNNER_TEMP/changelog.md"
           {
+            echo "release=true"
             echo "version=$version"
             echo "commit=$commit"
+            echo "newest=$newest"
           } >> "$GITHUB_OUTPUT"
 
       - name: tag
+        if: steps.version.outputs.release == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
           COMMIT: ${{ steps.version.outputs.commit }}
-          DIGEST: ${{ steps.rc.outputs.digest }}
+          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           tagged=$(git rev-parse -q --verify "refs/tags/$VERSION^{commit}" || true)
           if [ -z "$tagged" ]; then
@@ -146,7 +204,7 @@ jobs:
           elif [ "$tagged" = "$COMMIT" ]; then
             echo "The tag $VERSION is on $COMMIT already."
           else
-            echo "::error::The tag $VERSION is on $tagged, not on $COMMIT, the rc's commit."
+            echo "::error::The tag $VERSION is on $tagged, not on $COMMIT, the release's commit."
             exit 1
           fi
           if current=$(crane digest "$IMAGE:$VERSION" 2> /dev/null); then
@@ -166,6 +224,7 @@ jobs:
 
       - name: GitHub Release
         id: release
+        if: steps.version.outputs.release == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -191,7 +250,7 @@ jobs:
             core.setOutput('url', data.html_url);
 
       - name: npm package
-        if: inputs.npm-package != ''
+        if: inputs.npm-package != '' && steps.version.outputs.release == 'true'
         working-directory: ${{ inputs.npm-package }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -219,6 +278,7 @@ jobs:
 
       - name: vault
         id: vault
+        if: steps.version.outputs.release == 'true'
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: ${{ env.VAULT_ADDR }}
@@ -235,6 +295,7 @@ jobs:
       # As in release-candidate.yml.
       - name: promoter token
         id: promoter
+        if: steps.version.outputs.release == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VAULT_TOKEN: ${{ steps.vault.outputs.vault_token }}
@@ -272,15 +333,24 @@ jobs:
             core.setSecret(token);
             core.setOutput('token', token);
 
-      # As in release-candidate.yml, on prod's pin. gitops' main may have
-      # moved since it was checked out: the PR starts from where it is now.
+      # As in release-candidate.yml, on prod's pin, for the newest release
+      # alone: a rerun of an older one never supersedes a newer one's PR.
+      # gitops' main may have moved since it was checked out: the PR starts
+      # from where it is now.
       - name: pin
         id: pin
+        if: steps.version.outputs.release == 'true'
         working-directory: _gitops
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          DIGEST: ${{ steps.rc.outputs.digest }}
+          NEWEST: ${{ steps.version.outputs.newest }}
+          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
+          if [ "$NEWEST" != "$VERSION" ]; then
+            echo "::notice::$NEWEST is released after $VERSION, and prod's PR is its own: none for $VERSION."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git fetch -q --depth 1 origin main
           git checkout -q --detach FETCH_HEAD
           pin="apps/$APP/prod/kustomization.yaml"
@@ -314,7 +384,7 @@ jobs:
         env:
           ENVIRONMENT: prod
           VERSION: ${{ steps.version.outputs.version }}
-          DIGEST: ${{ steps.rc.outputs.digest }}
+          DIGEST: ${{ steps.image.outputs.digest }}
           PIN: ${{ steps.pin.outputs.path }}
           BASE: ${{ steps.pin.outputs.base }}
           TITLE: "chore(${{ inputs.app }}): release ${{ steps.version.outputs.version }} to prod"

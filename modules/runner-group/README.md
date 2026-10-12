@@ -8,8 +8,8 @@ Most of the repos are public, so the group allows public repositories. Two
 locks keep code from outside off the runners:
 
 - The group is restricted to the workflows listed in `workflows`: the reusable
-  tofu, Packer and Ansible workflows, and those a private repo runs here,
-  **on `main`**. A job that a PR or a fork writes for itself gets no runner,
+  tofu, Packer and Ansible workflows, and those an application or a private
+  repo runs here, **on `main`**. A job that a PR or a fork writes for itself gets no runner,
   whatever it asks for.
 - Those workflows send fork PRs to GitHub's runners.
 

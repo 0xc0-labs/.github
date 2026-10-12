@@ -26,7 +26,7 @@ mise.toml                  pinned tool versions
   node-check.yml           reusable: lint, type-check, build and, when asked, test a Node app, with its mise.toml's node and pnpm
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
-  release.yml              reusable: by hand, release the rc staging runs and open prod's PR in gitops
+  release.yml              reusable: release the rc staging runs, by hand, or with no staging each push to main; open prod's PR in gitops
   package-release.yml      reusable: on a push to main, release a package of a monorepo to GitHub Packages
   org-plan.yml             this repo: plan environments/prod on every PR
   org-apply.yml            this repo: apply it after merge, once approved
@@ -142,11 +142,14 @@ Where they run:
   (`payload`, `artistlabco.com`), run on GitHub's runners, the default of
   both workflows: the caller passes no `runs-on`. Neither logs in to Vault,
   nor gets `id-token: write`. The build caches in GitHub's cache.
-- **A private application's rc and release** run on the self-hosted
-  runners, the `0xc0` group: they log in to Vault, which only the CI VMs
-  reach. `release-candidate` and `release` default to that group, and are
-  the only jobs of the application that take it: its repo stays in
-  `runner_group.repositories` for them.
+- **Every application's rc and release**, a private one's or a public one's
+  (`offby1.cc`'s release), run on the self-hosted runners, the `0xc0` group:
+  they log in to Vault, which only the CI VMs reach. `release-candidate` and
+  `release` default to that group, and are the only jobs of the application
+  that take it: its repo is in `runner_group.repositories` for them. A
+  public repo's logs are public, those jobs' too: the runner's name and
+  Vault's address show, as in this repo's own runs, and every token, and
+  every value read from Vault, is masked.
 
 Why a private application's checks and image left the CI VMs (operator
 decision, 2026-10-12; workspace#138): two Next.js builds at once hung a CI
@@ -189,7 +192,25 @@ and `apps/<app>/prod/`, each with its pin):
    image's tag on another digest, the package with other contents, an open
    PR with another pin).
 
-Both PRs are opened by the `0xc0-labs-promoter` App, whose key never leaves
+The delivery, for an application with no staging (`apps/<app>/prod/`
+alone): **every push to `main`** is a release, and merging prod's PR is the
+approval (operator decision, 2026-10-12). After the image, `release`, with
+`staging: false`, releases the commit pushed: the version `git-cliff`
+computes, as for an rc, but with no rc; the image's `sha-<7>` digest tagged
+with it; then the tag, the Release, the package and prod's PR as in 2,
+closing the older prod PRs still open. Nothing of staging is read or
+written. A push releases nothing, and says so in a notice, when a later
+release contains its commit (a rerun, after a newer push released), or when
+`git-cliff` counts none of its commits since the last release (all skipped
+by the `cliff.toml`): they go out with the next release. One release runs at
+a time per repo, and a newer push replaces a run still waiting, whose commit
+the newer release includes. A failed run can be rerun, as in 2.
+
+Either way, prod's PR is the newest release's alone: a run that finishes an
+older release once a newer one exists opens none, and never closes the newer
+one's.
+
+Each PR is opened by the `0xc0-labs-promoter` App, whose key never leaves
 Vault: the job logs in with the JWT role named after its repo (bound to
 `main` and to `release*.yml`), reads `ci/shared/github-promoter-app`, has
 Transit sign the App's JWT, and exchanges it for a token narrowed to
@@ -283,6 +304,44 @@ of the failed run reads staging again: it would release the newer rc, or fail
 when that rc is of the same version, whose tag is on another commit. A new
 run naming the failed one's rc finishes that release instead. A named rc must
 exist, as an image tag and as a git tag, or the run fails.
+
+An application with no staging calls `release` from its CI, after the
+image, on a push alone, and has no `release.yml` of its own:
+
+```yaml
+# .github/workflows/ci.yml, of a public application with no staging
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    permissions:
+      contents: read
+      packages: read
+    uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
+  image:
+    needs: check
+    permissions:
+      contents: read
+      packages: write
+    uses: 0xc0-labs/.github/.github/workflows/container-image.yml@main
+  release:
+    needs: image
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: 0xc0-labs/.github/.github/workflows/release.yml@main
+    with:
+      app: offby1-cc
+      staging: false
+```
 
 GHCR creates every package private, and only the web UI can change that, so
 a new public application takes one manual step. After the first push to
