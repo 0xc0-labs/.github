@@ -19,8 +19,7 @@ variable "operator_user_id" {
   type        = number
 }
 
-# Deliberately set only on the command line (-var bootstrap=true), never in
-# terraform.tfvars: committed, it would leave every ruleset disabled.
+# Command line only: committed, it would leave every ruleset disabled.
 variable "bootstrap" {
   description = "True only for the org's very first apply, before any history is pushed: every ruleset is created disabled so each main can receive its initial push. A repo added later uses its own bootstrap in repositories instead."
   type        = bool
@@ -39,13 +38,11 @@ variable "repositories" {
     production_environment = optional(bool, false)
     # Brand new, no history: an initial commit lets its ruleset start active.
     auto_init = optional(bool, false)
-    # A repo added with existing history: its ruleset alone is disabled while
-    # that history is pushed. Remove it right after.
+    # Only while existing history is pushed: README, Adding a repo.
     bootstrap = optional(bool, false)
     # Only checks that report on every PR, once they have run: one that never
     # reports blocks every PR.
-    required_checks = optional(list(string), [])
-    # A PR may be set to merge itself once its required checks pass.
+    required_checks  = optional(list(string), [])
     allow_auto_merge = optional(bool, false)
   }))
 

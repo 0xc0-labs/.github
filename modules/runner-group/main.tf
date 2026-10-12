@@ -4,7 +4,7 @@ locals {
   # them the other way round ('-' before '.'), and any order but GitHub's
   # shows a change on every plan. So the sort key moves the extension's dot
   # below every name character.
-  workflows_by_key = { for w in var.workflows : replace(w, "/\\.(ya?ml)@/", " .$1@") => w }
+  workflows_by_github_sort_key = { for w in var.workflows : replace(w, "/\\.(ya?ml)@/", " .$1@") => w }
 }
 
 resource "github_actions_runner_group" "main" {
@@ -20,6 +20,5 @@ resource "github_actions_runner_group" "main" {
   # Only these workflows get a runner: a job a PR or a fork writes for itself
   # does not, whatever it asks for in runs-on.
   restricted_to_workflows = true
-  # In GitHub's order (local.workflows_by_key).
-  selected_workflows = [for k in sort(keys(local.workflows_by_key)) : local.workflows_by_key[k]]
+  selected_workflows      = [for k in sort(keys(local.workflows_by_github_sort_key)) : local.workflows_by_github_sort_key[k]]
 }

@@ -1,7 +1,6 @@
-# Reusable: fail a PR that changes a Claude Code plugin without bumping its
-# version. A session gets a new copy of a plugin only when its version
-# changes, so a change without a bump never reaches the sessions that
-# auto-update it. A PR that changes no plugin passes.
+# Reusable: a PR that changes a Claude Code plugin bumps its version. A
+# session gets a new copy only when the version changes, so a change without
+# a bump never reaches the sessions that auto-update it.
 name: plugin-version
 
 on:
@@ -27,9 +26,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The version is read from plugin.json, at the base and at the head.
-      # Claude Code takes plugin.json's over the marketplace entry's without
-      # warning, so an entry that declares one must agree with it.
+      # Claude Code takes plugin.json's version over the marketplace entry's
+      # without warning, so an entry that declares one must agree with it.
       - name: versions
         env:
           BASE: ${{ github.event.pull_request.base.sha }}

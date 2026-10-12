@@ -1,17 +1,6 @@
-# Reusable: check every environment's pin in a GitOps repo, and keep the
-# org's bots to pins.
-#
-# - Where a kustomization.yaml generates the `release` ConfigMap, its
-#   APP_VERSION must equal the newTag of the application's image, the one
-#   images entry under ghcr.io/<owner>/: the version a service reports is
-#   the one it runs.
-# - A PR the org's GitHub Apps open (the promoter's promotions, Renovate's
-#   updates) may change one environment's pin and nothing else: the
-#   application's image newTag and digest, and APP_VERSION, in one
-#   apps/<app>/<env>/kustomization.yaml. Staging's promotions merge
-#   themselves, so a bot's PR that reaches further fails here. Its author and
-#   its changes come from the event and the API, never from the PR's branch,
-#   and this rule runs from .github@main: the PR cannot change what checks it.
+# Reusable: each environment's APP_VERSION is its image's newTag, so the
+# version a service reports is the one it runs, and the org's bots change
+# pins alone (README, Application repos).
 #
 # Not named release*: that glob is the Vault role the release jobs log in
 # with, and this one logs in nowhere.

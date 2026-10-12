@@ -1,11 +1,6 @@
-# Reusable: build a repo's image; on main, push it to GHCR. Trunk-based: every
-# commit on main is a deployable image, tagged sha-<7> and main, never latest.
-# GHCR takes the job's GITHUB_TOKEN; no secret is involved.
-#
-# On GitHub's runners it builds with Buildx. The self-hosted runners have no
-# Docker: there it builds with the instance's rootless BuildKit, through
-# buildctl (infrastructure, ansible/roles/github_runner/README.md). Every
-# build there starts cold, so its layer cache lives in GHCR, beside the image.
+# Reusable: build a repo's image; on main, push it to GHCR (README,
+# Application repos). The self-hosted runners have no Docker: there it builds
+# with buildctl (infrastructure, ansible/roles/github_runner/README.md).
 name: container-image
 
 on:
@@ -70,7 +65,6 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
 
-      # GitHub's runners: Buildx, with its cache in GitHub's.
       - if: runner.environment == 'github-hosted'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

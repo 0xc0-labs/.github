@@ -179,8 +179,7 @@ jobs:
 
       # Packer's plugins live in GitHub's cache between builds: the runner's
       # home is emptied around every job, and without it each build would
-      # download them again from GitHub's releases. They go under RUNNER_TEMP,
-      # which the runner empties too. The key is the templates'
+      # download them again from GitHub's releases. The key is the templates'
       # required_plugins blocks alone, braces counted, so a bump changes it
       # by itself and any other edit keeps it.
       - name: plugins key
@@ -201,7 +200,6 @@ jobs:
           path: ${{ runner.temp }}/packer-plugins
           key: ${{ steps.plugins-key.outputs.key }}
 
-      # JWT login with the job's OIDC token: no Vault credential is stored.
       - name: vault
         if: inputs.vault-addr != ''
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
@@ -220,9 +218,8 @@ jobs:
         run: |
           if [ -n "${PROXMOX_VE_API_TOKEN:-}" ]; then echo "::add-mask::${PROXMOX_VE_API_TOKEN#*=}"; fi
 
-      # Every template of the chain, before any is built. A transient error
-      # from GitHub's releases must not fail the build: each init is tried up
-      # to three times, 15 s and then 45 s apart, and fails after the last.
+      # Every template of the chain, before any is built. Retried: a transient
+      # error from GitHub's releases must not fail the build.
       - name: init
         run: |
           # Not while-read: a command reading stdin would eat the list.
@@ -246,8 +243,6 @@ jobs:
           path: ${{ runner.temp }}/packer-plugins
           key: ${{ steps.plugins-key.outputs.key }}
 
-      # Each template is built beside the old one, as <name>-next at its VMID
-      # + 50, and replaces it only once the build has succeeded.
       - name: build
         run: |
           for name in $TEMPLATES; do

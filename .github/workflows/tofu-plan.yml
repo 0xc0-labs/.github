@@ -51,15 +51,13 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
-    # A running plan is never cancelled: killing tofu mid-run can leave the
-    # state lock behind.
+    # Killing tofu mid-run can leave the lock behind: README, Concurrency.
     concurrency:
       group: tofu-plan-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.working-directory }}
       cancel-in-progress: false
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
-      # An apply or another PR's plan may hold the lock for a moment.
       TF_CLI_ARGS_plan: "-lock-timeout=5m"
       ROOT: ${{ inputs.working-directory }}
       VAULT_ADDR: ${{ inputs.vault-addr }}
@@ -92,7 +90,6 @@ jobs:
         with:
           install_args: ${{ inputs.tools }}
 
-      # JWT login with the job's OIDC token: no Vault credential is stored.
       - name: vault
         if: steps.changes.outputs.tofu == 'true' && inputs.vault-addr != ''
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
