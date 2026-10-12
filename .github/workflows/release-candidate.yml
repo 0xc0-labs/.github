@@ -22,6 +22,14 @@ on:
           Vault is reached only from inside the network.
         type: string
         default: '{"group": "0xc0", "labels": "0xc0"}'
+      skip-paths:
+        description: Globs added to the paths that never cut an rc (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cut one, even where the central list ignores them, such as markdown the image copies in (README, Path gates).
+        type: string
+        default: ''
 
 env:
   VAULT_ADDR: https://vault.int.0xc0.cc
@@ -32,8 +40,22 @@ env:
   GIT_CLIFF__BUMP__BREAKING_ALWAYS_BUMP_MAJOR: "false"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   rc:
-    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     permissions:
       contents: write # the rc's tag

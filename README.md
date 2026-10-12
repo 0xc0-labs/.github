@@ -13,6 +13,7 @@ modules/runner-group/      the runner group for the self-hosted runners on the C
 environments/prod/         root: calls the modules
 scripts/tofu               runs tofu on an environment, secrets read from Vault into env
 mise.toml                  pinned tool versions
+.github/actions/changes/   composite action: did the push, PR or merge group change anything a workflow cares about
 .github/workflows/
   tofu-plan.yml            reusable: fmt, validate, plan, comment on the PR
   tofu-apply.yml           reusable: apply inside an approval-gated environment
@@ -71,7 +72,9 @@ scripts/tofu prod plan
 ## Using the reusable workflows from another repo
 
 Every workflow with steps of its own lives here. A repo only holds thin
-callers: the triggers and paths, then `uses:` one of these, `@main`.
+callers: the triggers, then `uses:` one of these, `@main`. A caller filters no
+paths: each workflow decides, from what changed, whether it has work to do
+(Path gates).
 
 ```yaml
 # A workflow that logs in to Vault asks for id-token: the job logs in with
@@ -579,6 +582,70 @@ alone) is set to:
   overtook could not otherwise enter without someone updating it. GitHub's
   [documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
   says the queue "provides the same benefits as" it.
+
+## Path gates
+
+A workflow runs only for a change it cares about (operator decision,
+2026-10-12; .github#130). The decision is here, in the reusable workflows, and
+not in the callers: a caller's `paths-ignore` on a required check leaves the
+check unreported and blocks the PR for good, and `paths` on a push to `main`
+is a copy of what the workflow knows. So callers trigger on every PR and every
+push to `main`, and every job of a workflow but `pr-issue`'s waits for its
+`changes` job. That job skips them when nothing counts, and a skipped job
+counts as passed under its usual check name: a required check never blocks.
+
+`changes` is the composite action `.github/actions/changes`, which every
+workflow calls as `0xc0-labs/.github/.github/actions/changes@main`. It reads
+the changed files from GitHub's compare API, so it needs no checkout, and its
+token reads only contents:
+
+- a **push** compares the branch's previous commit with the new one;
+- a **PR**, its base with its head;
+- a **merge group**, its base with its head, so a group runs what its PRs ran;
+- anything else (`workflow_dispatch`, a schedule) always runs;
+- a new branch, a base GitHub cannot find (a force-push), a compare that
+  fails, or 3000 files or more run the work: a gate never skips by guess.
+
+A path counts unless the **central list** ignores it, one file for every
+workflow, `.github/actions/changes/ignore.txt`:
+
+```
+.claude/**   **/*.md   docs/**   odd/**   LICENSE
+```
+
+A workflow may restrict what counts to its own paths. A path outside them
+does not count, nor one inside them that the central list ignores, unless the
+workflow ships it (a package's README is in the package):
+
+| Workflow | Counts |
+|---|---|
+| `semgrep`, `ansible`, `packer`, `tofu-apply`, `package-release`, `release-candidate`, `release` | whatever the central list does not ignore. `ansible` and `packer` then pick the playbooks and templates the change affects. `package-release` also runs on a push to another package, which finds a release left undone, and counts its package's markdown. `release` run by hand always runs |
+| `node-check` | under `working-directory`, plus the root's `mise.toml`, `mise.lock`, `.mise/`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `.npmrc`; with `.`, the whole repo |
+| `container-image` | under `context`, and the `file`; with `.`, the whole repo |
+| `tofu-plan` | what `paths` matches, a regex: `^(environments/\|modules/\|mise\.toml$)` by default |
+| `kustomize-validate` | under `components` and `manifests` |
+| `pin-check` | the `pins`. A PR of one of the org's bots is always checked: what a bot may change is what its checks guard |
+| `plugin-version` | under `plugins`, and the `marketplace` file, markdown included |
+| `hook-tests` | whatever the central list does not ignore, and everything under `plugins/` |
+| `pr-issue` | always: it checks the PR, not the code |
+
+`tofu-apply` skips only on the central list: a root reads more than
+`environments/` and `modules/`, and the apply re-plans anyway.
+
+A caller changes the definition through two inputs every gated workflow
+takes, globs separated by whitespace (`*` inside a directory, `**` across
+them), added to the workflow's own and never replacing them:
+
+- `skip-paths`: more paths that never cause work, as `generated/**`.
+- `work-paths`: paths that always do, even those the central list ignores. An
+  app whose image copies in its blog's markdown passes `content/**`.
+
+No caller needs either today. `container-image` reads its `context`, but
+`release-candidate` and `release` do not: an app whose image holds a
+subdirectory passes them the other paths in `skip-paths`.
+
+`.github/actions/changes/test.sh` holds the decision's cases: run it with
+`bash` after a change to the central list or to the action.
 
 ## Semgrep
 

@@ -23,6 +23,14 @@ on:
           group admits the repo.
         type: string
         default: '"ubuntu-latest"'
+      skip-paths:
+        description: Globs added to the paths that never cause a release (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a release check, besides the package's own directory (README, Path gates).
+        type: string
+        default: ''
 
 env:
   # Whatever the caller's cliff.toml says: while in 0.x, a breaking change
@@ -31,8 +39,25 @@ env:
   GIT_CLIFF__BUMP__BREAKING_ALWAYS_BUMP_MAJOR: "false"
 
 jobs:
+  # The package's README ships in it, so a change there counts. A push that
+  # touches only another package still runs: the job finds a release its last
+  # push left undone.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ format('{0}/** {1}', inputs.directory, inputs.work-paths) }}
+
   release:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     permissions:
       contents: write # the tag and the GitHub Release

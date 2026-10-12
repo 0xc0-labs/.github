@@ -1,6 +1,6 @@
 # Reusable: fmt, validate and plan an OpenTofu root, and post the plan on the PR.
-# It runs on every PR so its check can be required; with no file matching
-# `paths`, it finishes green without init.
+# A PR touching no file it cares about skips the job, which counts as passed,
+# so its check can be required (README, Path gates).
 name: tofu-plan
 
 on:
@@ -14,6 +14,14 @@ on:
         description: Extended regex over changed file paths. A PR touching none of them skips the plan.
         type: string
         default: '^(environments/|modules/|mise\.toml$)'
+      skip-paths:
+        description: Globs added to the paths that never cause a plan (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a plan, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
       tools:
         description: mise tools to install. Only these — a broken, unrelated tool in the repo's mise.toml must not block a plan or an apply.
         type: string
@@ -43,7 +51,23 @@ on:
         default: ""
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          paths-regex: ${{ inputs.paths }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   tofu:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # Fork PRs run on GitHub's runners, with no secrets, never in the network.
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     # id-token: for the Vault login; the caller grants it even without Vault.
@@ -63,35 +87,13 @@ jobs:
       VAULT_ADDR: ${{ inputs.vault-addr }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: changes
-        id: changes
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          PATHS: ${{ inputs.paths }}
-        run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "tofu=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          changed="$(git diff --name-only "origin/$BASE_REF...HEAD")"
-          if printf '%s\n' "$changed" | grep -Eq "$PATHS"; then
-            echo "tofu=true" >> "$GITHUB_OUTPUT"
-            echo "OpenTofu-relevant changes:"; printf '%s\n' "$changed" | grep -E "$PATHS"
-          else
-            echo "tofu=false" >> "$GITHUB_OUTPUT"
-            echo "No file matches '$PATHS'. Plan skipped."
-          fi
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
-        if: steps.changes.outputs.tofu == 'true'
         with:
           install_args: ${{ inputs.tools }}
 
       - name: vault
-        if: steps.changes.outputs.tofu == 'true' && inputs.vault-addr != ''
+        if: inputs.vault-addr != ''
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: ${{ inputs.vault-addr }}
@@ -103,26 +105,22 @@ jobs:
           secrets: ${{ inputs.vault-secrets }}
 
       - name: fmt
-        if: steps.changes.outputs.tofu == 'true'
         run: tofu fmt -check -recursive -no-color
 
       - name: init
-        if: steps.changes.outputs.tofu == 'true'
         run: |
           tofu -chdir="$ROOT" init -no-color
 
       - name: validate
-        if: steps.changes.outputs.tofu == 'true'
         run: tofu -chdir="$ROOT" validate -no-color
 
       - name: plan
-        if: steps.changes.outputs.tofu == 'true'
         run: |
           tofu -chdir="$ROOT" plan -no-color -out=tfplan
           tofu -chdir="$ROOT" show -no-color tfplan > plan.txt
 
       - name: comment
-        if: github.event_name == 'pull_request' && steps.changes.outputs.tofu == 'true'
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

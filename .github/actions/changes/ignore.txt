@@ -1,0 +1,10 @@
+# The paths that never cause work, for every reusable workflow (README,
+# Path gates). One glob per line, relative to the repo root: `*` stays inside
+# a directory, `**` crosses them. A workflow that ships one of these to its
+# output (markdown an image copies in, say) lists it in its caller's
+# `work-paths`.
+.claude/**
+**/*.md
+docs/**
+odd/**
+LICENSE

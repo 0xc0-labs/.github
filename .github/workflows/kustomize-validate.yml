@@ -20,12 +20,37 @@ on:
         description: mise tools to install, pinned in the caller's mise.toml.
         type: string
         default: kustomize helm kubeconform
+      skip-paths:
+        description: Globs added to the paths that never cause a validation (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause one, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
+  # Under the components and the manifests: README, Path gates.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          paths: ${{ format('{0}/** {1}', inputs.components, inputs.manifests != '' && format('{0}/**', inputs.manifests) || '') }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   validate:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     env:
       COMPONENTS: ${{ inputs.components }}

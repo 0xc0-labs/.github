@@ -68,6 +68,14 @@ on:
         description: The environment variable, one of vault-secrets, that holds the CI SSH private key.
         type: string
         required: true
+      skip-paths:
+        description: Globs added to the paths that never cause work (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause work, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
 
 # id-token: for the Vault login; the caller grants it even without Vault.
 permissions:
@@ -75,9 +83,24 @@ permissions:
   id-token: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
   # A changed playbook, or one naming a changed role; any other change runs
   # them all.
   select:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     outputs:
       playbooks: ${{ steps.select.outputs.playbooks }}
@@ -130,7 +153,8 @@ jobs:
   # The whole ansible-dir, whichever playbooks the change affects. Only on a
   # PR: what reaches main was linted on its PR.
   lint:
-    if: github.event_name == 'pull_request' && inputs.lint != ''
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && github.event_name == 'pull_request' && inputs.lint != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
