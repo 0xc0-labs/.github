@@ -72,7 +72,7 @@ Every workflow with steps of its own lives here. A repo only holds thin
 callers: the triggers and paths, then `uses:` one of these, `@main`.
 
 ```yaml
-# Every reusable workflow asks for id-token: the job logs in to Vault with
+# A workflow that logs in to Vault asks for id-token: the job logs in with
 # GitHub's OIDC token.
 permissions:
   contents: read
@@ -91,11 +91,16 @@ jobs:
         ci/data/shared/rustfs secret_access_key | AWS_SECRET_ACCESS_KEY ;
 ```
 
-No `runs-on` is needed: the job defaults to the self-hosted runners on
-the CI VMs, and fork PRs go to `ubuntu-latest`. The runner group admits the
-reusable workflows already, as they are on `main`, but only from the repos in
-`runner_group.repositories`, in `environments/prod/terraform.tfvars`: the
-caller's repo must be listed there.
+No `runs-on` is needed: each workflow defaults to where its jobs run, and
+fork PRs go to `ubuntu-latest`. **Only the jobs that log in to Vault run on
+the self-hosted runners** on the CI VMs, which alone reach it: those of
+`tofu-plan`, `tofu-apply`, `packer`, `ansible`, `release-candidate` and
+`release`. Every other job runs on GitHub's runners, for every repo, public
+or private: `node-check`, `container-image` and `package-release` never log
+in to Vault. The runner group admits the reusable workflows already, as they
+are on `main`, but only from the repos in `runner_group.repositories`, in
+`environments/prod/terraform.tfvars`: the caller of a workflow that runs
+there must have its repo listed.
 
 **Secrets come from Vault, and no repo holds any** (operator decision,
 2026-10-01). The job logs in with its GitHub OIDC token (JWT auth, through
@@ -392,6 +397,11 @@ What `packages` brings: a `cliff.toml`; `node`, `pnpm` and `git-cliff` in its
 - No `workspace:` dependency on another package of the repo: it would be
   published with that one's committed `0.0.0`.
 
+Its checks and releases run on GitHub's runners, the default of `node-check`
+and `package-release`: the caller passes no `runs-on`. Neither logs in to
+Vault, nor gets `id-token: write`: the release tags and publishes with the
+job's own token.
+
 ```yaml
 # .github/workflows/ci.yml, of packages
 on:
@@ -409,7 +419,6 @@ jobs:
       packages: read
     uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
     with:
-      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
       test: true
   release:
     needs: check
@@ -425,7 +434,6 @@ jobs:
     uses: 0xc0-labs/.github/.github/workflows/package-release.yml@main
     with:
       directory: packages/${{ matrix.package }}
-      runs-on: '{"group": "0xc0", "labels": "0xc0"}'
 ```
 
 **Reading one, from an app.** No secret in any repo: each place gets a token
