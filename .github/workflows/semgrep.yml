@@ -25,17 +25,9 @@ on:
         description: mise tools to install, pinned in the caller's mise.toml.
         type: string
         default: python uv pipx:semgrep
-      sarif:
-        description: >-
-          Upload the findings to code scanning. For a public repo: a private
-          one on GitHub Free has none. Every caller grants security-events:
-          write, as a job's permissions cannot depend on an input.
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   scan:
@@ -46,7 +38,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      security-events: write
     env:
       RULE_SETS: ${{ inputs.rule-sets }}
     steps:
@@ -72,33 +63,26 @@ jobs:
           for set in $RULE_SETS; do
             configs+=(--config ".semgrep-rules/$set")
           done
-          # Findings are read from the SARIF; the exit code is the verdict.
+          # Findings are read from the JSON, which leaves out what a nosemgrep
+          # waives; the exit code is the verdict.
           status=0
           semgrep scan --metrics=off --disable-version-check --error \
-            --sarif-output="$RUNNER_TEMP/semgrep.sarif" --exclude .semgrep-rules "${configs[@]}" . || status=$?
+            --json-output="$RUNNER_TEMP/semgrep.json" --exclude .semgrep-rules "${configs[@]}" . || status=$?
           echo "SEMGREP_STATUS=$status" >> "$GITHUB_ENV"
 
       - name: summary
         run: |
           {
             echo "## Semgrep"
-            count=$(jq '[.runs[].results[]] | length' "$RUNNER_TEMP/semgrep.sarif")
+            count=$(jq '.results | length' "$RUNNER_TEMP/semgrep.json")
             if [ "$count" = 0 ]; then
               echo "No findings."
             else
               echo "| File | Line | Rule |"
               echo "|---|---|---|"
-              jq -r '.runs[].results[] | "| \(.locations[0].physicalLocation.artifactLocation.uri) | \(.locations[0].physicalLocation.region.startLine) | \(.ruleId | split(".") | .[-1]) |"' "$RUNNER_TEMP/semgrep.sarif"
+              jq -r '.results[] | "| \(.path) | \(.start.line) | \(.check_id | split(".") | .[-1]) |"' "$RUNNER_TEMP/semgrep.json"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: code scanning
-        # A PR from a fork gets a read-only token: it cannot upload.
-        if: always() && inputs.sarif && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
-        with:
-          sarif_file: ${{ runner.temp }}/semgrep.sarif
-          category: semgrep
 
       - name: verdict
         run: exit "$SEMGREP_STATUS"

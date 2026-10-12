@@ -591,10 +591,10 @@ runs on GitHub's runners, and `--metrics=off` keeps telemetry off.
   available to others as a service. A scan of our own code in our own CI is
   that use. Hence the rules are never copied into a repo.
 - **Findings** fail the job and show in the job summary with file, line and
-  rule. With `sarif: true`, on a public repo, they also go to code scanning
-  (not on a fork's PR, whose token is read-only). A private repo on GitHub
-  Free has no code scanning: it leaves `sarif` off. Every caller grants
-  `security-events: write`, whatever `sarif` says.
+  rule. Nothing goes to code scanning: its SARIF carries the findings a
+  `nosemgrep` waives too, so each waiver would reopen as an alert to dismiss
+  by hand, and a private repo on GitHub Free has no code scanning at all. No
+  caller grants `security-events: write`.
 
 A repo calls it with a thin caller and declares the tools:
 
@@ -607,7 +607,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   semgrep:
