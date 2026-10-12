@@ -28,9 +28,7 @@ repositories = {
     description = "ArgoCD manifests for the cluster"
     topics      = ["argocd", "0xc0"]
     # validate.yml runs both of its jobs on every PR, with no paths filter.
-    # Not "semgrep / scan" yet: its caller does not trigger on merge_group, so
-    # the queue would wait on it for ever (.github#126).
-    required_checks = ["issue / check", "validate / validate", "pin / check"]
+    required_checks = ["issue / check", "validate / validate", "pin / check", "semgrep / scan"]
     # Staging's promotion PRs merge themselves, once these pass; prod's never do.
     allow_auto_merge = true
     merge_queue      = true
