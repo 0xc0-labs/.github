@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   semgrep:
-    uses: 0xc0-labs/.github/.github/workflows/semgrep.yml@main
+    # This repo's own copy, so a PR tests the workflow it changes.
+    uses: ./.github/workflows/semgrep.yml
     with:
       sarif: true
