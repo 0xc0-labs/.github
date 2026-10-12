@@ -1,0 +1,104 @@
+# Reusable: Semgrep Community Edition over the caller's repo, with the engine
+# from the caller's mise.toml and a pinned commit of semgrep/semgrep-rules.
+# No login, no telemetry; a finding fails the job (README, Semgrep).
+#
+# Not named release*: that glob is the Vault role the release jobs log in
+# with, and this one logs in nowhere, so it runs on GitHub's runners.
+name: semgrep
+
+on:
+  workflow_call:
+    inputs:
+      rules-ref:
+        description: >-
+          Commit of semgrep/semgrep-rules the rules are read from, never a
+          branch. Bumped here, in one PR, for every caller at once.
+        type: string
+        default: 9bbf021d0acffa3095fcffd17b2bc7787eb4796d
+      rule-sets:
+        description: >-
+          Directories of semgrep-rules to run, space-separated: what the org
+          writes (README, Semgrep).
+        type: string
+        default: typescript javascript terraform yaml/kubernetes yaml/github-actions dockerfile bash python
+      tools:
+        description: mise tools to install, pinned in the caller's mise.toml.
+        type: string
+        default: python uv pipx:semgrep
+      sarif:
+        description: >-
+          Upload the findings to code scanning. For a public repo: a private
+          one on GitHub Free has none. Every caller grants security-events:
+          write, as a job's permissions cannot depend on an input.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      RULE_SETS: ${{ inputs.rule-sets }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Fetched, never vendored: the Semgrep Rules License lets us use the
+      # rules for our own business, not distribute them, and this repo is
+      # public (README, Semgrep).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: semgrep/semgrep-rules
+          ref: ${{ inputs.rules-ref }}
+          path: .semgrep-rules
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: ${{ inputs.tools }}
+
+      - name: scan
+        run: |
+          configs=()
+          for set in $RULE_SETS; do
+            configs+=(--config ".semgrep-rules/$set")
+          done
+          # Findings are read from the SARIF; the exit code is the verdict.
+          status=0
+          semgrep scan --metrics=off --disable-version-check --error \
+            --sarif-output="$RUNNER_TEMP/semgrep.sarif" --exclude .semgrep-rules "${configs[@]}" . || status=$?
+          echo "SEMGREP_STATUS=$status" >> "$GITHUB_ENV"
+
+      - name: summary
+        run: |
+          {
+            echo "## Semgrep"
+            count=$(jq '[.runs[].results[]] | length' "$RUNNER_TEMP/semgrep.sarif")
+            if [ "$count" = 0 ]; then
+              echo "No findings."
+            else
+              echo "| File | Line | Rule |"
+              echo "|---|---|---|"
+              jq -r '.runs[].results[] | "| \(.locations[0].physicalLocation.artifactLocation.uri) | \(.locations[0].physicalLocation.region.startLine) | \(.ruleId | split(".") | .[-1]) |"' "$RUNNER_TEMP/semgrep.sarif"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: code scanning
+        # A PR from a fork gets a read-only token: it cannot upload.
+        if: always() && inputs.sarif && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: ${{ runner.temp }}/semgrep.sarif
+          category: semgrep
+
+      - name: verdict
+        run: exit "$SEMGREP_STATUS"

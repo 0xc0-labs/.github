@@ -7,6 +7,11 @@ jq       = "1.8.2"
 vault    = "2.0.4"
 actionlint = "1.7.12"
 terraform-docs = "0.24.0"
+# The engine the semgrep workflow runs on this repo, with the python and uv
+# that install it.
+python = "3.12.14"
+uv = "0.12.17"
+"pipx:semgrep" = "1.180.0"
 
 [tasks.docs]
 description = "Regenerate the inputs/outputs section of every module README"
