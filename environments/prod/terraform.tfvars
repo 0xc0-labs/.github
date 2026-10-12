@@ -65,9 +65,10 @@ repositories = {
   }
 }
 
-# The repos whose CI needs the network, and the private repos, whose whole CI
-# runs here: their checks, their image, their rc and their release, or their
-# packages' releases.
+# The repos whose CI needs the network, and the private repos' jobs that run
+# here: an application's rc and release, which log in to Vault, and packages'
+# checks and releases. A private application's checks and image run on
+# GitHub's runners (README, Application repos).
 runner_group = {
   name         = "0xc0"
   repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com", "packages"]
