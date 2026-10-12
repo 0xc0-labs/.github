@@ -1,5 +1,4 @@
-# Reusable: fail a PR whose body links no issue. A PR the org's GitHub Apps
-# open, a promotion or a dependency update, needs none.
+# Reusable: fail a PR that links no issue, unless the org's GitHub Apps open it.
 name: pr-issue
 
 on:

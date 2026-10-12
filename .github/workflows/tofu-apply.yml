@@ -1,5 +1,4 @@
-# Reusable: apply an OpenTofu root. The operator's approval of the environment
-# is the human launching the apply.
+# Reusable: apply an OpenTofu root inside its approval-gated environment.
 name: tofu-apply
 
 on:
@@ -49,15 +48,13 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    # Never cancelled. A third merge replaces the waiting run: main is linear,
-    # and every apply re-plans against the live state.
+    # Never cancelled, and a waiting run may be replaced: README, Concurrency.
     concurrency:
       group: tofu-apply-${{ github.repository }}-${{ inputs.working-directory }}
       cancel-in-progress: false
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
-      # Wait for a PR plan or a local run to release the state lock.
       TF_CLI_ARGS_plan: "-lock-timeout=10m"
       TF_CLI_ARGS_apply: "-lock-timeout=10m"
       ROOT: ${{ inputs.working-directory }}
@@ -69,7 +66,6 @@ jobs:
         with:
           install_args: ${{ inputs.tools }}
 
-      # JWT login with the job's OIDC token: no Vault credential is stored.
       - name: vault
         if: inputs.vault-addr != ''
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0

@@ -108,8 +108,3 @@ resource "github_repository_environment_deployment_policy" "main" {
   environment    = github_repository_environment.main[0].environment
   branch_pattern = "main"
 }
-
-moved {
-  from = github_repository_ruleset.main
-  to   = github_repository_ruleset.main[0]
-}

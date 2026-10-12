@@ -52,6 +52,8 @@ environments/<env>/        root: backend.tf, main.tf, terraform.tfvars
   `bootstrap` is the one exception: command line only, never committed.
 - The inputs/outputs section of a module README is generated:
   `mise run docs`.
+- A `moved`, `import` or `removed` block is removed in a later PR, once its
+  apply is done and the plan shows no changes.
 
 ## Running it locally
 
@@ -116,8 +118,8 @@ environment the apply workflow waits on.
 An application checks its code with `node-check` and builds its image with
 `container-image`, which pushes to GHCR with the job's own `GITHUB_TOKEN`,
 only from `main`. Trunk-based, so every commit there is a deployable image,
-tagged `sha-<7>` and `main`. The image carries its commit: the build passes
-`APP_COMMIT`, which the Dockerfile turns into an `ENV`.
+tagged `sha-<7>` and `main`, never `latest`. The image carries its commit:
+the build passes `APP_COMMIT`, which the Dockerfile turns into an `ENV`.
 
 `node-check` installs only `node` and `pnpm` from the repo's `mise.toml`,
 at the versions there, checked against its `mise.lock`. A tool the repo
@@ -271,7 +273,8 @@ jobs:
 
 Leave `rc` empty: the release takes the rc staging runs. Name it only to
 finish a release whose run failed after staging moved to a newer rc. A rerun
-of the failed run reads staging again and would release the newer rc; a new
+of the failed run reads staging again: it would release the newer rc, or fail
+when that rc is of the same version, whose tag is on another commit. A new
 run naming the failed one's rc finishes that release instead. A named rc must
 exist, as an image tag and as a git tag, or the run fails.
 

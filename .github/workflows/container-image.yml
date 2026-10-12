@@ -1,16 +1,7 @@
-# Reusable: build a repo's image; on main, push it to GHCR. Trunk-based: every
-# commit on main is a deployable image, tagged sha-<7> and main, never latest.
-# GHCR takes the job's GITHUB_TOKEN; no secret is involved.
-#
-# On GitHub's runners it builds with Buildx. The self-hosted runners have no
-# Docker: there it builds with the instance's rootless BuildKit, through
-# buildctl (infrastructure, ansible/roles/github_runner/README.md). Every
-# build there starts cold, so its layer cache lives in GHCR, beside the image.
-#
-# Either way the build gets the build secret `npmrc`: a user config for a
-# private @0xc0-labs package, holding the job's own token. The Dockerfile
-# mounts it on its install alone, so it is in no layer (README, Shared
-# packages).
+# Reusable: build a repo's image; on main, push it to GHCR (README,
+# Application repos). The self-hosted runners have no Docker: there it builds
+# with buildctl (infrastructure, ansible/roles/github_runner/README.md). The
+# build secret `npmrc` reads a private package (README, Shared packages).
 name: container-image
 
 on:
@@ -75,8 +66,7 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
 
-      # Under RUNNER_TEMP, which the runner empties when the job ends. The
-      # token reads what packages: write lets the job read.
+      # Under RUNNER_TEMP, which the runner empties when the job ends.
       - name: npm credentials, for the build alone
         env:
           NPM_TOKEN: ${{ github.token }}
@@ -85,7 +75,6 @@ jobs:
           printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
             "//npm.pkg.github.com/:_authToken=$NPM_TOKEN" > "$RUNNER_TEMP/npmrc"
 
-      # GitHub's runners: Buildx, with its cache in GitHub's.
       - if: runner.environment == 'github-hosted'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

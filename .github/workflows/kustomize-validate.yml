@@ -1,5 +1,4 @@
-# Reusable: render every Kustomize component exactly as Argo CD does, and
-# validate it against the cluster's Kubernetes version.
+# Reusable: render each Kustomize component as Argo CD does, and validate it.
 name: kustomize-validate
 
 on:
