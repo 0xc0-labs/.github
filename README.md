@@ -51,6 +51,8 @@ environments/<env>/        root: backend.tf, main.tf, terraform.tfvars
   `bootstrap` is the one exception: command line only, never committed.
 - The inputs/outputs section of a module README is generated:
   `mise run docs`.
+- A `moved`, `import` or `removed` block is removed in a later PR, once its
+  apply is done and the plan shows no changes.
 
 ## Running it locally
 
