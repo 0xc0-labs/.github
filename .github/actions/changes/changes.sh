@@ -93,6 +93,25 @@ range() {
   esac
 }
 
+# The files of a compare, page by page. The self-hosted runners have curl and
+# jq but not `gh`, which GitHub's own images carry.
+compare_files() {
+  local url="repos/$GITHUB_REPOSITORY/compare/$1...$2?per_page=100"
+  if command -v gh > /dev/null; then
+    gh api --paginate "$url" --jq '.files[]? | .filename, (.previous_filename // empty)'
+    return
+  fi
+  local page=1 names
+  while :; do
+    names=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+      "${GITHUB_API_URL:-https://api.github.com}/$url&page=$page" \
+      | jq -r '.files[]? | .filename, (.previous_filename // empty)') || return 1
+    [ -n "$names" ] || break
+    printf '%s\n' "$names"
+    page=$((page + 1))
+  done
+}
+
 result() {
   echo "run=$1" >> "$GITHUB_OUTPUT"
   printf '%s\n' "$2"
@@ -112,8 +131,7 @@ main() {
   fi
   # The base is the event's own: a PR's base, a push's previous commit, a merge
   # group's base. One GitHub cannot find, a force-push's, does the work.
-  if ! files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$base...$head?per_page=100" \
-    --jq '.files[]? | .filename, (.previous_filename // empty)' 2> "$err"); then
+  if ! files=$(compare_files "$base" "$head" 2> "$err"); then
     result true "Cannot compare $base...$head ($(head -n1 "$err")): the work runs."; return
   fi
   # The compare lists 3000 files at most: a longer list is cut short.
