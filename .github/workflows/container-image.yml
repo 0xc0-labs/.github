@@ -71,7 +71,9 @@ jobs:
 
   image:
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    # A draft is never merged: its image waits for ready_for_review (README,
+    # Application repos).
+    if: needs.changes.outputs.run == 'true' && !(github.event_name == 'pull_request' && github.event.pull_request.draft)
     # Fork PRs run on GitHub's runners, never in the network.
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
     # The same group as node-check's job (README, Concurrency).

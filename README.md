@@ -299,6 +299,7 @@ merge itself.
 # .github/workflows/ci.yml, of a private application
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -846,6 +847,13 @@ and every push to a PR runs its checks again.
   any. Both jobs share that group, so a caller's `image` job `needs` its
   `check`, as in Application repos' example: started side by side on a PR,
   the later would cancel the other.
+- **Drafts**: `container-image` skips its `image` job on a draft PR and
+  builds on one that is not, and on every push to `main`. The skipped job
+  reports `skipped`, which a required check counts as passing: right, since
+  a draft cannot be merged. The caller's `pull_request` trigger must list
+  `ready_for_review` (the `types` of the example in Application repos), or
+  marking the PR ready starts nothing. `node-check` still runs on drafts:
+  the sessions need its result before they mark a PR ready.
 - **Timeouts**: each of those jobs stops well above its usual time, under 5
   minutes, so a hung one frees its runner long before GitHub's default 6
   hours. The image's is the longer: a cold build cache rebuilds every layer.
