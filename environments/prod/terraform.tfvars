@@ -70,7 +70,9 @@ repositories = {
 # here: their rc and release, which log in to Vault. Every other job, an
 # application's or packages', runs on GitHub's runners (README); packages,
 # and the workflows those jobs call, stay listed as the fallback should
-# GitHub's free minutes run out (workspace#138).
+# GitHub's free minutes run out (workspace#138). The private repos' jobs that
+# build nothing (the issue check, semgrep, the coverage comment) run here too,
+# to save those minutes; the Next.js builds stay on GitHub's runners for now.
 runner_group = {
   name         = "0xc0"
   repositories = [".github", "infrastructure", "vault", "payload", "artistlabco.com", "packages", "offby1.cc"]
@@ -84,5 +86,8 @@ runner_group = {
     "0xc0-labs/.github/.github/workflows/release-candidate.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/release.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/package-release.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/pr-issue.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/semgrep.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/coverage-comment.yml@refs/heads/main",
   ]
 }
