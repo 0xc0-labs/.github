@@ -17,12 +17,12 @@ on:
         required: true
       runs-on:
         description: >-
-          Where the job runs, as JSON. GitHub's runners by default, where
-          packages runs it (README, Shared packages); '{"group": "0xc0",
-          "labels": "0xc0"}' for the self-hosted runners, once the runner
-          group admits the repo.
+          Where the job runs, as JSON. Empty by default: GitHub's runners
+          for a public repo, the org's runners (group 0xc0) for a private
+          one (README, Shared packages). Set it, such as '"ubuntu-latest"',
+          to choose. A PR from a fork always runs on "ubuntu-latest".
         type: string
-        default: '"ubuntu-latest"'
+        default: ''
       skip-paths:
         description: Globs added to the paths that never cause a release (README, Path gates).
         type: string
@@ -58,7 +58,10 @@ jobs:
   release:
     needs: changes
     if: needs.changes.outputs.run == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest'
+      || fromJSON(inputs.runs-on != '' && inputs.runs-on
+      || (github.event.repository.private && '{"group": "0xc0", "labels": ["0xc0"]}' || '"ubuntu-latest"')) }}
     permissions:
       contents: write # the tag and the GitHub Release
       packages: write # the npm package

@@ -103,8 +103,9 @@ the self-hosted runners** on the CI VMs, which alone reach it: those of
 `tofu-plan`, `tofu-apply`, `packer`, `ansible`, `release-candidate` and
 `release`. **A private repo's light jobs, those that build nothing, run
 there too**: every `changes` job of `node-check`, `container-image`,
-`release-candidate`, `release`, `package-release` and `semgrep`, and the
-jobs of `pr-issue`, `coverage-comment` and `semgrep`'s scan. Each picks its
+`release-candidate`, `release`, `package-release` and `semgrep`, the
+release job of `package-release` (it compiles a TypeScript package, so it
+needs no `build` runner), and the jobs of `pr-issue`, `coverage-comment` and `semgrep`'s scan. Each picks its
 runner from the caller's visibility, `github.event.repository.private`: the
 group `0xc0` for a private repo, `ubuntu-latest` for a public one, whose
 minutes are free. The runners have `curl` and `jq` but not `gh`, so the
@@ -473,8 +474,9 @@ What `packages` brings: a `cliff.toml`; `node`, `pnpm` and `git-cliff` in its
   published with that one's committed `0.0.0`.
 
 Its checks run on the `build` runners, the default of `node-check` in a
-private repo, and its releases on GitHub's, the default of `package-release`:
-the caller passes no `runs-on`. Neither logs in to
+private repo, and its releases on the org's runners, group `0xc0`, the
+default of `package-release` in a private repo: the caller passes no
+`runs-on`. Neither logs in to
 Vault, nor gets `id-token: write`: the release tags and publishes with the
 job's own token.
 
