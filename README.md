@@ -98,12 +98,13 @@ jobs:
 ```
 
 No `runs-on` is needed: each workflow defaults to where its jobs run, and
-fork PRs go to `ubuntu-latest`. **Only the jobs that log in to Vault run on
-the self-hosted runners** on the CI VMs, which alone reach it: those of
+fork PRs go to `ubuntu-latest`. **The jobs that log in to Vault run on the
+self-hosted runners** on the CI VMs, which alone reach it: those of
 `tofu-plan`, `tofu-apply`, `packer`, `ansible`, `release-candidate` and
-`release`. Every other job runs on GitHub's runners, for every repo, public
-or private: `node-check`, `container-image` and `package-release` never log
-in to Vault. The runner group admits the reusable workflows already, as they
+`release`. In a private repo every other job runs there too, and the Next.js
+builds (`node-check`'s `check`, `container-image`'s `image`) on the `build`
+runners, one per VM (workspace#180); a public repo's stay on GitHub's
+runners. The runner group admits the reusable workflows already, as they
 are on `main`, but only from the repos in `runner_group.repositories`, in
 `environments/prod/terraform.tfvars`: the caller of a workflow that runs
 there must have its repo listed.
@@ -196,10 +197,15 @@ jobs:
 
 Where they run:
 
-- **Every application's checks and image**, public (`offby1.cc`) or private
-  (`payload`, `artistlabco.com`), run on GitHub's runners, the default of
-  both workflows: the caller passes no `runs-on`. Neither logs in to Vault,
-  nor gets `id-token: write`. The build caches in GitHub's cache.
+- **A private application's checks and image** (`payload`,
+  `artistlabco.com`) run on the org's runners, the `0xc0` group, on those that
+  carry the label `build`: one per CI VM, so a VM never runs two builds at
+  once. The caller passes no `runs-on`: the workflows pick the group from the
+  repo's visibility. Neither logs in to Vault, nor gets `id-token: write`.
+  The image builds with the VM's BuildKit and caches in GHCR. This spares
+  GitHub's minutes (workspace#180).
+- **A public application's checks and image** (`offby1.cc`) run on GitHub's
+  runners, free for a public repo, and build in GitHub's cache.
 - **Every application's rc and release**, a private one's or a public one's
   (`offby1.cc`'s release), run on the self-hosted runners, the `0xc0` group:
   they log in to Vault, which only the CI VMs reach. `release-candidate` and
@@ -209,15 +215,19 @@ Where they run:
   Vault's address show, as in this repo's own runs, and every token, and
   every value read from Vault, is masked.
 
-Why a private application's checks and image left the CI VMs (operator
-decision, 2026-10-12; workspace#138): two Next.js builds at once hung a CI
+Why a private application's checks and image left the CI VMs, and came back
+on the `build` runners (operator decisions, 2026-10-12, workspace#138;
+2026-10-14, workspace#180): two Next.js builds at once hung a CI
 VM, whose 2 vCPU and 4 GB its two runners share, and blocked CI for about 35
 minutes (infrastructure#235), and the node has no memory left to give them
 (62 GB, 60 allocated). A private repo's GitHub runner has 2 CPU and 8 GB to
 itself. The cost is GitHub Free's 2,000 minutes a month, shared by the org's
 private repos: once they run out, their jobs on GitHub's runners are
 blocked, not billed. `payload` used about 320 from 2026-10-01 to 10-12. The
-rc and release, on the CI VMs, use none of them.
+rc and release, on the CI VMs, use none of them. With 941 minutes left on
+2026-10-14, the builds came back to the CI VMs, now one per VM: the `build`
+label caps it at one build per VM, and each app bounds its build's memory
+(payload#93, artistlabco.com#30).
 
 The build carries a `mode=max` provenance and an SBOM, from a scanner image
 pinned by digest.

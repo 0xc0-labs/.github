@@ -11,13 +11,13 @@ on:
         default: .
       runs-on:
         description: >-
-          Where the job runs, as JSON. GitHub's runners by default, where
-          every application runs it, public or private (README, Application
-          repos); '{"group": "0xc0", "labels": "0xc0"}' for the self-hosted
-          runners, once the runner group admits the repo. A PR from a fork
-          always runs on "ubuntu-latest", never on the self-hosted ones.
+          Where the job runs, as JSON. Empty by default: GitHub's runners
+          for a public repo, the org's `build` runners (group 0xc0, one per
+          CI VM) for a private one (README, Application repos). Set it, such
+          as '{"group": "0xc0", "labels": ["0xc0"]}', to choose. A PR from a
+          fork always runs on "ubuntu-latest", never on the self-hosted ones.
         type: string
-        default: '"ubuntu-latest"'
+        default: ''
       tools:
         description: >-
           mise tools to install besides node and pnpm, space-separated,
@@ -71,7 +71,10 @@ jobs:
   check:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON(inputs.runs-on) }}
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest'
+      || fromJSON(inputs.runs-on != '' && inputs.runs-on
+      || (github.event.repository.private && '{"group": "0xc0", "labels": ["build"]}' || '"ubuntu-latest"')) }}
     # The same group as container-image's job, so a caller's image job needs
     # its check job (README, Concurrency).
     concurrency:
