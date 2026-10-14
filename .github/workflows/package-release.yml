@@ -43,7 +43,7 @@ jobs:
   # touches only another package still runs: the job finds a release its last
   # push left undone.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group": "0xc0", "labels": "0xc0"}') || 'ubuntu-latest') }}
     permissions:
       contents: read
     outputs:

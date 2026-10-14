@@ -98,12 +98,19 @@ jobs:
 ```
 
 No `runs-on` is needed: each workflow defaults to where its jobs run, and
-fork PRs go to `ubuntu-latest`. **Only the jobs that log in to Vault run on
+fork PRs go to `ubuntu-latest`. **The jobs that log in to Vault run on
 the self-hosted runners** on the CI VMs, which alone reach it: those of
 `tofu-plan`, `tofu-apply`, `packer`, `ansible`, `release-candidate` and
-`release`. Every other job runs on GitHub's runners, for every repo, public
-or private: `node-check`, `container-image` and `package-release` never log
-in to Vault. The runner group admits the reusable workflows already, as they
+`release`. **A private repo's light jobs, those that build nothing, run
+there too**: every `changes` job of `node-check`, `container-image`,
+`release-candidate`, `release`, `package-release` and `semgrep`, and the
+jobs of `pr-issue`, `coverage-comment` and `semgrep`'s scan. Each picks its
+runner from the caller's visibility, `github.event.repository.private`: the
+group `0xc0` for a private repo, `ubuntu-latest` for a public one, whose
+minutes are free. The runners have `curl` and `jq` but not `gh`, so the
+`changes` action reads the compare with `curl` there. The Next.js builds,
+`node-check`'s `check` and `container-image`'s `image`, stay on GitHub's
+runners for every repo (Application repos, below). The runner group admits the reusable workflows already, as they
 are on `main`, but only from the repos in `runner_group.repositories`, in
 `environments/prod/terraform.tfvars`: the caller of a workflow that runs
 there must have its repo listed.
@@ -198,7 +205,10 @@ Where they run:
 
 - **Every application's checks and image**, public (`offby1.cc`) or private
   (`payload`, `artistlabco.com`), run on GitHub's runners, the default of
-  both workflows: the caller passes no `runs-on`. Neither logs in to Vault,
+  both workflows: the caller passes no `runs-on`. The light jobs around
+  them, `changes`, `pr-issue`, `coverage-comment` and `semgrep`, run on the
+  self-hosted runners in a private repo (workspace#180): GitHub bills each
+  job at least one minute, and they were a third of `payload`'s. Neither logs in to Vault,
   nor gets `id-token: write`. The build caches in GitHub's cache.
 - **Every application's rc and release**, a private one's or a public one's
   (`offby1.cc`'s release), run on the self-hosted runners, the `0xc0` group:
@@ -701,7 +711,8 @@ subdirectory passes them the other paths in `skip-paths`.
 
 `semgrep` scans a repo with Semgrep Community Edition and fails on a finding
 (operator decision, 2026-10-12; workspace#150). It logs in to nothing, so it
-runs on GitHub's runners, and `--metrics=off` keeps telemetry off.
+runs on GitHub's runners in a public repo and on the self-hosted ones in a
+private one, and `--metrics=off` keeps telemetry off.
 
 - **The engine** is the caller's: `"pipx:semgrep"` pinned in its `mise.toml`,
   with `python` and `uv` pinned beside it, and `mise lock` (`locked = true`

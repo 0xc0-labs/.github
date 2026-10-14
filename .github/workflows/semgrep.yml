@@ -4,7 +4,8 @@
 # telemetry; a finding fails the job (README, Semgrep).
 #
 # Not named release*: that glob is the Vault role the release jobs log in
-# with, and this one logs in nowhere, so it runs on GitHub's runners.
+# with, and this one logs in nowhere. A public repo's jobs run on GitHub's
+# runners, a private one's on the org's (README, Using the reusable workflows from another repo).
 name: semgrep
 
 on:
@@ -40,7 +41,7 @@ permissions:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group": "0xc0", "labels": "0xc0"}') || 'ubuntu-latest') }}
     permissions:
       contents: read
     outputs:
@@ -55,7 +56,7 @@ jobs:
   scan:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group": "0xc0", "labels": "0xc0"}') || 'ubuntu-latest') }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
