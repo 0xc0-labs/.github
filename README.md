@@ -461,8 +461,9 @@ What `packages` brings: a `cliff.toml`; `node`, `pnpm` and `git-cliff` in its
 - No `workspace:` dependency on another package of the repo: it would be
   published with that one's committed `0.0.0`.
 
-Its checks and releases run on GitHub's runners, the default of `node-check`
-and `package-release`: the caller passes no `runs-on`. Neither logs in to
+Its checks run on the `build` runners, the default of `node-check` in a
+private repo, and its releases on GitHub's, the default of `package-release`:
+the caller passes no `runs-on`. Neither logs in to
 Vault, nor gets `id-token: write`: the release tags and publishes with the
 job's own token.
 
