@@ -1,0 +1,80 @@
+# Reusable: fail a Feature PR whose first commit is not its ODD feature document.
+name: odd-first
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group":"0xc0","labels":"0xc0"}') || 'ubuntu-latest') }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: first commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          # Read from the environment, never interpolated into the script.
+          BODY: ${{ github.event.pull_request.body }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = merge_group ]; then
+            echo "A merge group: each of its PRs passed this check."
+            exit 0
+          fi
+          case "$AUTHOR" in
+            "0xc0-labs-promoter[bot]" | "0xc0-labs-renovate[bot]")
+              echo "Opened by $AUTHOR: no ODD document needed."
+              exit 0
+              ;;
+          esac
+
+          # Same pattern as pr-issue; a link to another repo's issue does not
+          # say what this repo's change is, so only a bare #N or this repo's
+          # counts.
+          pattern='(^|[^[:alnum:]])(close[sd]?|fix(e[sd])?|resolve[sd]?|refs?)[[:space:]]+([[:alnum:]_.-]+/[[:alnum:]_.-]+)?#[0-9]+'
+          issue=""
+          while IFS= read -r ref; do
+            ref="${ref##*[[:space:]]}"
+            case "$ref" in
+              "#"*) issue="${ref#\#}"; break ;;
+              "$REPO#"*) issue="${ref#"$REPO"#}"; break ;;
+            esac
+          done < <(printf '%s' "$BODY" | grep -Eio "$pattern")
+          if [ -z "$issue" ]; then
+            echo "No linked issue of this repo: issue / check reports it."
+            exit 0
+          fi
+
+          type=$(gh api "repos/$REPO/issues/$issue" --jq '.type.name // "none"')
+          if [ "$type" != Feature ]; then
+            echo "Issue #$issue is a $type, not a Feature: no ODD document needed."
+            exit 0
+          fi
+
+          first=$(gh api "repos/$REPO/pulls/$PR/commits?per_page=1" --jq '.[0].sha')
+          files=$(gh api "repos/$REPO/commits/$first" --jq '.files[] | "\(.status) \(.filename)"')
+          adds_document=false
+          outside=""
+          while IFS= read -r line; do
+            status="${line%% *}"
+            name="${line#* }"
+            case "$name" in
+              odd/*) ;;
+              *) outside="$outside $name" ;;
+            esac
+            if [ "$status" = added ] && printf '%s' "$name" | grep -Eq '^odd/tasks/[^/]+\.md$'; then
+              adds_document=true
+            fi
+          done <<< "$files"
+
+          if [ "$adds_document" = true ] && [ -z "$outside" ]; then
+            echo "Issue #$issue is a Feature and the first commit, ${first:0:7}, adds its ODD document."
+            exit 0
+          fi
+          echo "::error::Issue #$issue is a Feature, so its ODD feature document comes before the code (operator decision, 2026-10-15): the PR's first commit must add an odd/tasks/*.md and nothing outside odd/. The first commit, ${first:0:7}, does not. Start a new branch whose first commit is the document, then move the code on top of it."
+          exit 1

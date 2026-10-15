@@ -18,6 +18,7 @@ mise.toml                  pinned tool versions
   tofu-plan.yml            reusable: fmt, validate, plan, comment on the PR
   tofu-apply.yml           reusable: apply inside an approval-gated environment
   pr-issue.yml             reusable: fail a PR that links no issue, unless one of the org's Apps opened it
+  odd-first.yml            reusable: fail a PR that closes a Feature issue unless its first commit adds only the ODD feature document, `odd/tasks/*.md`
   packer.yml               reusable: validate Packer templates; rebuild the affected ones, a job per chain, once approved
   hook-tests.yml           reusable: run a repo's hook test cases
   plugin-version.yml       reusable: fail a PR that changes a Claude Code plugin without bumping its version, or whose marketplace entry declares another
@@ -133,6 +134,22 @@ the repo may read. `ansible` writes the CI SSH key from the variable that
 A repo whose applies run from CI needs `production_environment = true` in
 `environments/prod/terraform.tfvars`: that creates the approval-gated
 environment the apply workflow waits on.
+
+### ODD first
+
+`odd-first` fails a PR whose linked issue is a Feature unless the PR's first
+commit adds only its ODD feature document: at least one `odd/tasks/*.md`, and
+no file outside `odd/` (operator decision, 2026-10-15). It finds the issue as
+`pr-issue` does, from `Closes #N` and its variants, and reads its type through
+the API. It passes, saying why, on a PR of the org's Apps, a merge group, a PR
+with no linked issue of the repo (`issue / check` reports that) and an issue
+that is a Task or a Bug. Its job is `check`, so a caller named `odd-first`
+reports `odd-first / check`. The caller grants `contents`, `issues` and
+`pull-requests` read, which a `permissions: {}` caller does not.
+
+A private repo on the Free plan cannot require it: rulesets apply only to
+public repos (`modules/repository`'s `visibility`), so on `payload`,
+`artistlabco.com` and `packages` it shows red without blocking the merge.
 
 ### Application repos
 
@@ -701,7 +718,7 @@ workflow ships it (a package's README is in the package):
 | `pin-check` | the `pins`. A PR of one of the org's bots is always checked: what a bot may change is what its checks guard |
 | `plugin-version` | under `plugins`, and the `marketplace` file, markdown included |
 | `hook-tests` | whatever the central list does not ignore, and everything under `plugins/` |
-| `pr-issue` | always: it checks the PR, not the code |
+| `pr-issue`, `odd-first` | always: they check the PR, not the code |
 
 `tofu-apply` skips only on the central list: a root reads more than
 `environments/` and `modules/`, and the apply re-plans anyway.
