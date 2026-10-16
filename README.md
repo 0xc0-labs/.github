@@ -714,7 +714,7 @@ workflow ships it (a package's README is in the package):
 | `node-check` | under `working-directory`, plus the root's `mise.toml`, `mise.lock`, `.mise/`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `.npmrc`; with `.`, the whole repo |
 | `container-image` | under `context`, and the `file`; with `.`, the whole repo |
 | `tofu-plan` | what `paths` matches, a regex: `^(environments/\|modules/\|mise\.toml$)` by default |
-| `kustomize-validate` | under `components` and `manifests` |
+| `kustomize-validate` | under each glob of `components`, under `manifests`, and under the other children of each glob's parent: for `platform/* apps/*/prod apps/*/staging`, `apps/<app>/base` counts with the environments that include it. Derived by `.github/actions/component-paths`, so a caller sets nothing |
 | `pin-check` | the `pins`. A PR of one of the org's bots is always checked: what a bot may change is what its checks guard |
 | `plugin-version` | under `plugins`, and the `marketplace` file, markdown included |
 | `hook-tests` | whatever the central list does not ignore, and everything under `plugins/` |
@@ -737,6 +737,7 @@ subdirectory passes them the other paths in `skip-paths`.
 
 `.github/actions/changes/test.sh` holds the decision's cases: run it with
 `bash` after a change to the central list or to the action.
+`.github/actions/component-paths/test.sh` holds `kustomize-validate`'s.
 
 ## Semgrep
 

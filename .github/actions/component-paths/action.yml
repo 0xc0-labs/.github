@@ -1,0 +1,31 @@
+name: component-paths
+description: >-
+  The globs a change must touch for kustomize-validate to run: every
+  component glob and its parent's other children, and the plain manifests
+  (README, Path gates).
+
+inputs:
+  components:
+    description: Globs of component directories, whitespace-separated.
+    required: true
+  manifests:
+    description: Directory of plain manifests. Empty adds nothing.
+    default: ''
+
+outputs:
+  paths:
+    description: The globs, whitespace-separated, for the changes action's `paths`.
+    value: ${{ steps.paths.outputs.paths }}
+
+runs:
+  using: composite
+  steps:
+    - id: paths
+      shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+        MANIFESTS: ${{ inputs.manifests }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        . "$ACTION_PATH/component-paths.sh"
+        echo "paths=$(component_paths)" >> "$GITHUB_OUTPUT"
