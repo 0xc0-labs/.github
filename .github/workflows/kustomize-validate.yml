@@ -41,10 +41,16 @@ jobs:
     outputs:
       run: ${{ steps.changes.outputs.run }}
     steps:
+      - id: paths
+        uses: 0xc0-labs/.github/.github/actions/component-paths@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          components: ${{ inputs.components }}
+          manifests: ${{ inputs.manifests }}
+
       - id: changes
         uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
         with:
-          paths: ${{ format('{0}/** {1}', inputs.components, inputs.manifests != '' && format('{0}/**', inputs.manifests) || '') }}
+          paths: ${{ steps.paths.outputs.paths }}
           skip-paths: ${{ inputs.skip-paths }}
           work-paths: ${{ inputs.work-paths }}
 
