@@ -138,7 +138,7 @@ jobs:
                 # its dependants found here too.
                 role="${f#"$ANSIBLE_DIR"/roles/}"; role="${role%%/*}"
                 for p in "${playbooks[@]}"; do
-                  if grep -Eq "^[[:space:]-]*(role|name):[[:space:]]*[\"']?$role[\"']?[[:space:]]*$" "$ANSIBLE_DIR/$p"; then hit["$p"]=1; fi
+                  if grep -Eq "^[[:space:]-]*(role|name):[[:space:]]*[\"']?${role}[\"']?[[:space:]]*$" "$ANSIBLE_DIR/$p"; then hit["$p"]=1; fi
                 done ;;
               *) all=1 ;;
             esac

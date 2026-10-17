@@ -88,6 +88,7 @@ jobs:
       # "  - id:" (README, Semgrep).
       - name: select security rules
         run: |
+          # shellcheck disable=SC2086 # RULE_SETS is a list of names, one argument each
           python - "$RUNNER_TEMP/security-rules" $RULE_SETS <<'PY'
           import os, re, sys
 
