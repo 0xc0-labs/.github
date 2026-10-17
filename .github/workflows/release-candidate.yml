@@ -231,33 +231,58 @@ jobs:
           persist-credentials: false
 
       # yq rewrites the values; only those changes reach the file, through a
-      # patch that ignores the blank lines yq drops.
+      # patch that ignores the blank lines yq drops. It pins gitops' head as of
+      # now, not as of the checkout: the merge queue merges the previous
+      # promotion after its own run ended, and a pin made on the old head
+      # conflicts with it.
       - name: pin
         id: pin
         working-directory: _gitops
         env:
           VERSION: ${{ steps.version.outputs.tag }}
           DIGEST: ${{ steps.tag.outputs.digest }}
+          GH_TOKEN: ${{ steps.promoter.outputs.token }}
         run: |
           pin="apps/$APP/staging/kustomization.yaml"
-          [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
-          mise trust --quiet
-          mise install yq
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git() { command git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" "$@"; }
           yq() { mise exec yq -- yq "$@"; }
-          yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
-            { echo "::error file=$pin::No images entry named $IMAGE."; exit 1; }
-          yq -e '.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))' "$pin" > /dev/null ||
-            { echo "::error file=$pin::No APP_VERSION in the release ConfigMap."; exit 1; }
-          yq '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST)) |
-              (.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' \
-            "$pin" > "$RUNNER_TEMP/pin.yaml"
-          diff -B -U0 --label "$pin" --label "$pin" "$pin" "$RUNNER_TEMP/pin.yaml" > "$RUNNER_TEMP/pin.diff" || true
-          if [ ! -s "$RUNNER_TEMP/pin.diff" ]; then
-            echo "Staging is pinned to $VERSION already."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git apply -p0 --unidiff-zero "$RUNNER_TEMP/pin.diff"
+          # sort -V ranks an rc below its release only with '~' for '-'.
+          sortable() { printf '%s' "${1#v}" | tr - '~'; }
+          settled=false
+          for _ in 1 2 3; do
+            git fetch --quiet --depth=1 origin main
+            git reset --quiet --hard FETCH_HEAD
+            [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
+            mise trust --quiet
+            mise install yq
+            yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
+              { echo "::error file=$pin::No images entry named $IMAGE."; exit 1; }
+            current=$(yq '.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION=")) | sub("^APP_VERSION=", "")' "$pin")
+            [ -n "$current" ] || { echo "::error file=$pin::No APP_VERSION in the release ConfigMap."; exit 1; }
+            if [ "$current" != "$VERSION" ] &&
+              [ "$(printf '%s\n%s\n' "$(sortable "$current")" "$(sortable "$VERSION")" | sort -V | tail -n1)" = "$(sortable "$current")" ]; then
+              echo "::notice::Staging is on $current, newer than $VERSION: not rolled back."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            yq '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST)) |
+                (.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' \
+              "$pin" > "$RUNNER_TEMP/pin.yaml"
+            diff -B -U0 --label "$pin" --label "$pin" "$pin" "$RUNNER_TEMP/pin.yaml" > "$RUNNER_TEMP/pin.diff" || true
+            if [ ! -s "$RUNNER_TEMP/pin.diff" ]; then
+              echo "Staging is pinned to $VERSION already."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git apply -p0 --unidiff-zero "$RUNNER_TEMP/pin.diff"
+            if [ "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" ]; then
+              settled=true
+              break
+            fi
+            echo "gitops' main moved while pinning: pinning again."
+          done
+          [ "$settled" = true ] || { echo "::error::gitops' main kept moving: run the job again."; exit 1; }
           git diff
           {
             echo "changed=true"
@@ -293,23 +318,19 @@ jobs:
             const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', head: `${owner}:${branch}` });
             let pr = prs.find((p) => p.state === 'open');
             const done = prs.find((p) => p.state === 'closed');
-            if (pr) {
-              const { data } = await github.rest.repos.getContent({ owner, repo, path: PIN, ref: pr.head.sha });
-              const pinned = Buffer.from(data.content, 'base64').toString();
-              if (!pinned.includes(`digest: ${DIGEST}`) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
-                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${DIGEST}.`);
-                return;
+
+            // The branch is put on BASE and committed to again, whether it is
+            // new, a leftover, or an open PR that main left behind.
+            const commitPin = async () => {
+              const { data: main } = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
+              if (main.object.sha !== BASE) {
+                core.setFailed(`gitops' main moved to ${main.object.sha} after ${PIN} was pinned on ${BASE}: run the job again.`);
+                return false;
               }
-              core.info(`#${pr.number} is open already with this pin.`);
-            } else if (done) {
-              core.notice(`#${done.number} promoted ${VERSION} before, and is ${done.merged_at ? 'merged' : 'closed'}: not opened again.`);
-              return;
-            } else {
               try {
                 await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: BASE });
               } catch (e) {
                 if (e.status !== 422) throw e;
-                // A branch with no PR: what a run left before opening one.
                 await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: BASE, force: true });
               }
               await github.graphql(
@@ -321,6 +342,34 @@ jobs:
                   fileChanges: { additions: [{ path: PIN, contents: fs.readFileSync(`_gitops/${PIN}`).toString('base64') }] },
                 } },
               );
+              return true;
+            };
+
+            if (pr) {
+              const { data } = await github.rest.repos.getContent({ owner, repo, path: PIN, ref: pr.head.sha });
+              const pinned = Buffer.from(data.content, 'base64').toString();
+              if (!pinned.includes(`digest: ${DIGEST}`) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
+                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${DIGEST}.`);
+                return;
+              }
+              // GitHub computes mergeability on demand: null until it has.
+              let mergeable = null;
+              for (let i = 0; i < 6 && mergeable === null; i++) {
+                if (i > 0) await new Promise((resolve) => setTimeout(resolve, 5000));
+                mergeable = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data.mergeable;
+              }
+              if (mergeable === false) {
+                core.warning(`#${pr.number} conflicts with main: rebuilt on ${BASE}.`);
+                if (!(await commitPin())) return;
+                pr = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
+              } else {
+                core.info(`#${pr.number} is open already with this pin.`);
+              }
+            } else if (done) {
+              core.notice(`#${done.number} promoted ${VERSION} before, and is ${done.merged_at ? 'merged' : 'closed'}: not opened again.`);
+              return;
+            } else {
+              if (!(await commitPin())) return;
               const body = [
                 `\`${APP}\` in ${ENVIRONMENT}: \`${VERSION}\`.`,
                 '',

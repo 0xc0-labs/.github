@@ -275,7 +275,11 @@ and `apps/<app>/prod/`, each with its pin):
    and sets it to merge itself once its checks pass. A failed run can be
    rerun: on the same commit it reuses its rc, skips what it finds published
    and matching, fails on what differs, and never opens again a staging PR
-   that was closed or merged, so an old rc cannot roll staging back.
+   that was closed or merged, so an old rc cannot roll staging back. The pin
+   is made on `gitops`' `main` as it is when the PR is opened, and a rerun
+   rebuilds an open PR that `main` left in conflict: the queue merges the
+   previous promotion after its run ends, so one run can open its PR on a
+   `main` that just moved.
 2. **A release** is `release`, run by hand (`workflow_dispatch`). It reads
    staging's pin on `gitops`' `main`, checks that the rc's tag names the
    pinned digest, and makes `vX.Y.Z` of it: a tag on the same commit, a
