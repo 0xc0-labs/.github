@@ -85,12 +85,7 @@ jobs:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
-      # On a PR marked ready, the draft's run may have tested this very
-      # commit (README, Concurrency, Drafts). The cache is the record: the
-      # job succeeds with its steps skipped, never `skipped` itself, so
-      # only a real pass of the same commit stands in for the tests. A PR's
-      # caches are visible to its later runs, and `github.sha` is the merge
-      # commit: a push, or a move of `main`, is a new key and runs in full.
+      # A pass of this same commit stands in for the tests on ready_for_review (README, Concurrency, Drafts).
       - id: passed
         if: github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
