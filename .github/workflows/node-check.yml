@@ -85,15 +85,32 @@ jobs:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # On a PR marked ready, the draft's run may have tested this very
+      # commit (README, Concurrency, Drafts). The cache is the record: the
+      # job succeeds with its steps skipped, never `skipped` itself, so
+      # only a real pass of the same commit stands in for the tests. A PR's
+      # caches are visible to its later runs, and `github.sha` is the merge
+      # commit: a push, or a move of `main`, is a new key and runs in full.
+      - id: passed
+        if: github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/node-check-passed
+          key: node-check-passed-${{ github.sha }}-${{ inputs.working-directory }}
+          lookup-only: true
 
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           working_directory: ${{ inputs.working-directory }}
           install_args: node pnpm${{ inputs.tools != '' && format(' {0}', inputs.tools) || '' }}
 
       # pnpm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
       - name: install
+        if: steps.passed.outputs.cache-hit != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
         run: |
@@ -103,16 +120,19 @@ jobs:
           NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc" pnpm install --frozen-lockfile
 
       - name: lint
+        if: steps.passed.outputs.cache-hit != 'true'
         run: pnpm lint
 
       - name: typecheck
+        if: steps.passed.outputs.cache-hit != 'true'
         run: pnpm typecheck
 
       - name: build
+        if: steps.passed.outputs.cache-hit != 'true'
         run: pnpm build
 
       - name: test
-        if: inputs.test
+        if: steps.passed.outputs.cache-hit != 'true' && inputs.test
         env:
           COVERAGE: ${{ inputs.coverage }}
         run: |
@@ -127,7 +147,7 @@ jobs:
       # they reach the script only through files and the environment.
       - name: coverage
         id: coverage
-        if: inputs.test && inputs.coverage
+        if: steps.passed.outputs.cache-hit != 'true' && inputs.test && inputs.coverage
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
@@ -177,9 +197,19 @@ jobs:
           EOF
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: inputs.test && inputs.coverage
+        if: steps.passed.outputs.cache-hit != 'true' && inputs.test && inputs.coverage
         with:
           name: coverage-report
           path: ${{ runner.temp }}/coverage-report/report.md
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: record the pass
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: echo "$GITHUB_SHA" > "$RUNNER_TEMP/node-check-passed"
+
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/node-check-passed
+          key: node-check-passed-${{ github.sha }}-${{ inputs.working-directory }}

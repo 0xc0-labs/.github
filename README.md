@@ -901,6 +901,18 @@ and every push to a PR runs its checks again.
   `ready_for_review` (the `types` of the example in Application repos), or
   marking the PR ready starts nothing. `node-check` still runs on drafts:
   the sessions need its result before they mark a PR ready.
+  Marking it ready reruns the caller's workflow, and `node-check` does not
+  test the commit again when its draft run already did (workspace#180):
+  a run that passes writes a cache entry keyed by the commit under test
+  (the PR's merge commit) and the working directory, and on
+  `ready_for_review` the `check` job looks it up and, on a hit, ends in
+  about a minute with every step but the lookup skipped. The job still
+  succeeds, never `skipped`: a required check counts `skipped` as passing,
+  so only a real pass of that same commit may stand in for the tests. A
+  miss runs in full: the last run failed or was cancelled, there was none,
+  or `main` moved and the merge commit is a new one. A push is a new commit
+  too. The caller's `coverage` job finds no report artifact in that run and
+  posts nothing, so the comment stays the draft's.
 - **Timeouts**: each of those jobs stops well above its usual time, under 5
   minutes, so a hung one frees its runner long before GitHub's default 6
   hours. The image's is the longer: a cold build cache rebuilds every layer.
