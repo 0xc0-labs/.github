@@ -6,6 +6,8 @@ jq       = "1.8.2"
 # The Vault CLI, the server's version: scripts/tofu reads the secrets with it.
 vault    = "2.0.4"
 actionlint = "1.7.12"
+# actionlint runs it on every workflow's shell steps when it is on PATH.
+shellcheck = "0.11.0"
 terraform-docs = "0.24.0"
 # The engine the semgrep workflow runs on this repo, with the python and uv
 # that install it.
