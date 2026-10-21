@@ -346,8 +346,14 @@ application: one version, one rc and one promotion PR cover both.
   `context: cms` and `file: cms/Dockerfile`, pushes `ghcr.io/<repo>-cms`,
   tagged `sha-<7>` and `main`. Its path gate watches that context and
   Dockerfile alone, so a commit that touches only the front builds no second
-  image, and the reverse. The suffix is lowercase words joined by `-`; the
-  two jobs run apart, and each caches in its own image's `buildcache` tag.
+  image. Not the reverse: the repo's own image has the root as its context,
+  so a change under `cms/` builds it too. That must stay: the `rc` job shares
+  the repo's image's path gate, and its own image must be built for every
+  commit an rc runs on, so a caller never puts the second image's context in
+  that image's `skip-paths`, or a change there alone gets no rc. The repo's
+  `.dockerignore` lists the second image's context, so the main image carries
+  none of it. The suffix is lowercase words joined by `-`; the two jobs run
+  apart, and each caches in its own image's `buildcache` tag.
 - **rc and release**: `extra-images: cms` in the caller's `release-candidate`
   and `release` (space separated for several). Each image is tagged with
   the version and pinned in the same PR: `newTag` and `digest` of every
