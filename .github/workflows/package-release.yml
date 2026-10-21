@@ -116,10 +116,26 @@ jobs:
           tag=$(git tag --points-at HEAD --list "$NAME-v*" --sort=-v:refname | releases | head -n1)
           if [ -n "$tag" ]; then
             echo "$COMMIT is $tag already."
+          else
+            # A release of $COMMIT is tagged on the run's commit of that time,
+            # after it: HEAD cannot see it, and git-cliff would count it as
+            # the newest tag and bump past it.
+            for later in $(git tag --merged "$GITHUB_SHA" --no-merged HEAD --list "$NAME-v*" --sort=-v:refname | releases); do
+              if git diff --quiet "$later" "$COMMIT" -- "$DIR"; then
+                tag=$later
+                echo "$later is on $(git rev-parse --short "$later") already, with the contents of $COMMIT."
+                break
+              fi
+            done
+          fi
+          if [ -n "$tag" ]; then
             tagged=true
           else
             last=$(git tag --merged HEAD --list "$NAME-v*" --sort=-v:refname | releases | head -n1)
-            tag=$(git cliff --bumped-version --include-path "$DIR/**")
+            # The range, because git-cliff ignores a tag outside the path, and
+            # the tag goes on the run's commit: without it, the next release
+            # computes $last again (#174).
+            tag=$(git cliff --bumped-version --include-path "$DIR/**" ${last:+"$last..HEAD"})
             if ! [[ "$tag" =~ ^$NAME-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::git-cliff gave '$tag', not a version of $NAME."
               exit 1
@@ -129,20 +145,11 @@ jobs:
               echo "release=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            # The tag sits on the run's commit, after $COMMIT, where HEAD cannot
-            # see it.
             if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-              if git merge-base --is-ancestor "refs/tags/$tag" "$GITHUB_SHA" \
-                && git diff --quiet "refs/tags/$tag" "$COMMIT" -- "$DIR"; then
-                echo "$tag is on $(git rev-parse --short "refs/tags/$tag") already, with the contents of $COMMIT."
-                tagged=true
-              else
-                echo "::error::The tag $tag exists already, but not on a commit of this run's history with the contents of $DIR at $COMMIT."
-                exit 1
-              fi
-            else
-              tagged=false
+              echo "::error::The tag $tag exists already, but not on a commit of this run's history with the contents of $DIR at $COMMIT."
+              exit 1
             fi
+            tagged=false
           fi
           previous=$(git tag --merged HEAD --list "$NAME-v*" --sort=-v:refname | releases | grep -vxF "$tag" | head -n1)
           git cliff --include-path "$DIR/**" --tag "$tag" --strip all "${previous:+$previous..}$COMMIT" > "$RUNNER_TEMP/changelog.md"
