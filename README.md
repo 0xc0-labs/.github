@@ -947,15 +947,20 @@ and every push to a PR runs its checks again.
 - **Stale PR plans** — PR B planned before PR A merged — are stopped by the
   ruleset requiring branches to be up to date.
 - **An application's checks**, `node-check` and `container-image`: one run
-  per PR. A newer push to a PR cancels its older run's check or image job,
-  whichever is running, and frees that runner. A run on `main` is never
+  per PR and app. A newer push to a PR cancels its older run's check or image
+  job, whichever is running, and frees that runner. A run on `main` is never
   cancelled, nor any run but a PR's: each `main` commit gets its own release
   candidate. The `concurrency` lives in the two reusable workflows, not in
   their callers (#113): a called workflow's `github` context is its
   caller's, so the group is the caller's workflow and PR, and no caller adds
-  any. Both jobs share that group, so a caller's `image` job `needs` its
-  `check`, as in Application repos' example: started side by side on a PR,
-  the later would cancel the other.
+  any. Its key ends in what tells an app apart: `node-check`'s in its
+  `working-directory`, `container-image`'s in its `image-suffix`. A caller
+  that checks the front (`.`) and a sub-app (`cms`) therefore runs both side
+  by side, and builds both images, where one shared group made the later
+  job cancel the earlier (#171). An app's check and image may or may not
+  share a group (the front's differ, `.` and empty; the CMS's both end in
+  `cms`), and it does not matter: the `image` job `needs` its `check`, as
+  in Application repos' example, so they never run together.
 - **Drafts**: `container-image` skips its `image` job on a draft PR and
   builds on one that is not, and on every push to `main`. The skipped job
   reports `skipped`, which a required check counts as passing: right, since

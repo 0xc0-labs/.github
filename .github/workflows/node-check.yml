@@ -75,10 +75,11 @@ jobs:
       ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest'
       || fromJSON(inputs.runs-on != '' && inputs.runs-on
       || (github.event.repository.private && '{"group": "0xc0", "labels": ["build"]}' || '"ubuntu-latest"')) }}
-    # The same group as container-image's job, so a caller's image job needs
-    # its check job (README, Concurrency).
+    # Keyed by working-directory: a caller that checks the front and a
+    # sub-app (cms) would otherwise cancel one with the other (README,
+    # Concurrency).
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.working-directory }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 20
     defaults:
