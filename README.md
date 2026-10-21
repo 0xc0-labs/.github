@@ -957,9 +957,10 @@ and every push to a PR runs its checks again.
   `working-directory`, `container-image`'s in its `image-suffix`. A caller
   that checks the front (`.`) and a sub-app (`cms`) therefore runs both side
   by side, and builds both images, where one shared group made the later
-  job cancel the earlier (#171). An app's check and image keep different
-  groups: the `image` job `needs` its `check`, as in Application repos'
-  example, so they never run together.
+  job cancel the earlier (#171). An app's check and image may or may not
+  share a group (the front's differ, `.` and empty; the CMS's both end in
+  `cms`), and it does not matter: the `image` job `needs` its `check`, as
+  in Application repos' example, so they never run together.
 - **Drafts**: `container-image` skips its `image` job on a draft PR and
   builds on one that is not, and on every push to `main`. The skipped job
   reports `skipped`, which a required check counts as passing: right, since
