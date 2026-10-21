@@ -1,9 +1,10 @@
 # Reusable: on a push to main, release one package of a monorepo when its
 # directory has something new (README, Shared packages).
 #
-# The release is the last commit that changed the directory, not the push's:
-# git-cliff, filtering commits by path, does not see a tag on a commit outside
-# it, and would count the same commits again.
+# The release's contents are the last commit that changed the directory, not
+# the push's: git-cliff, filtering commits by path, does not see a tag on a
+# commit outside it, and would count the same commits again. Its tag goes on
+# the push's commit (the tag step says why).
 name: package-release
 
 on:
@@ -115,10 +116,26 @@ jobs:
           tag=$(git tag --points-at HEAD --list "$NAME-v*" --sort=-v:refname | releases | head -n1)
           if [ -n "$tag" ]; then
             echo "$COMMIT is $tag already."
+          else
+            # A release of $COMMIT is tagged on the run's commit of that time,
+            # after it: HEAD cannot see it, and git-cliff would count it as
+            # the newest tag and bump past it.
+            for later in $(git tag --merged "$GITHUB_SHA" --no-merged HEAD --list "$NAME-v*" --sort=-v:refname | releases); do
+              if git diff --quiet "$later" "$COMMIT" -- "$DIR"; then
+                tag=$later
+                echo "$later is on $(git rev-parse --short "$later") already, with the contents of $COMMIT."
+                break
+              fi
+            done
+          fi
+          if [ -n "$tag" ]; then
             tagged=true
           else
             last=$(git tag --merged HEAD --list "$NAME-v*" --sort=-v:refname | releases | head -n1)
-            tag=$(git cliff --bumped-version --include-path "$DIR/**")
+            # The range, because git-cliff ignores a tag outside the path, and
+            # the tag goes on the run's commit: without it, the next release
+            # computes $last again (#174).
+            tag=$(git cliff --bumped-version --include-path "$DIR/**" ${last:+"$last..HEAD"})
             if ! [[ "$tag" =~ ^$NAME-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::git-cliff gave '$tag', not a version of $NAME."
               exit 1
@@ -129,7 +146,7 @@ jobs:
               exit 0
             fi
             if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-              echo "::error::The tag $tag exists already, on another commit than $COMMIT."
+              echo "::error::The tag $tag exists already, but not on a commit of this run's history with the contents of $DIR at $COMMIT."
               exit 1
             fi
             tagged=false
@@ -147,9 +164,12 @@ jobs:
         if: steps.version.outputs.release == 'true' && steps.version.outputs.tagged == 'false'
         env:
           TAG: ${{ steps.version.outputs.tag }}
-          COMMIT: ${{ steps.commit.outputs.commit }}
+        # On the run's commit, not the package's last: GitHub refuses a new ref
+        # from an App when its commit's workflow files differ from the default
+        # branch's, and that commit lags behind whenever another PR changes a
+        # workflow (#174). The npm package is still built from the package's.
         run: |
-          git tag "$TAG" "$COMMIT"
+          git tag "$TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG"
 
       - name: npm package
