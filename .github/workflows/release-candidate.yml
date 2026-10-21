@@ -16,6 +16,13 @@ on:
           no install, no lifecycle scripts. Empty, nothing is published.
         type: string
         default: ""
+      extra-images:
+        description: >-
+          Suffixes of the repo's second images, space separated: `cms` is
+          ghcr.io/<repo>-cms (container-image's image-suffix). Each is
+          tagged and pinned with the repo's own, under one version.
+        type: string
+        default: ''
       runs-on:
         description: >-
           Where the job runs, as JSON. The self-hosted runners by default:
@@ -69,10 +76,24 @@ jobs:
     env:
       APP: ${{ inputs.app }}
       IMAGE: ghcr.io/${{ github.repository }}
+      EXTRA_IMAGES: ${{ inputs.extra-images }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # IMAGES: the repo's own image first, then its second images.
+      - name: images
+        run: |
+          images=$IMAGE
+          for suffix in $EXTRA_IMAGES; do
+            if ! [[ "$suffix" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "::error::extra-images has '$suffix', not lowercase words joined by '-'."
+              exit 1
+            fi
+            images="$images ${IMAGE}-${suffix}"
+          done
+          echo "IMAGES=$images" >> "$GITHUB_ENV"
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
@@ -104,65 +125,6 @@ jobs:
           mkdir -m 0700 "$RUNNER_TEMP/docker"
           auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/docker/config.json"
-
-      - name: tag
-        id: tag
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          digest=$(crane digest "$IMAGE:sha-${GITHUB_SHA::7}")
-          tagged=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
-          if [ -z "$tagged" ]; then
-            git tag "$TAG" "$GITHUB_SHA"
-            git push origin "refs/tags/$TAG"
-          elif [ "$tagged" = "$GITHUB_SHA" ]; then
-            echo "The tag $TAG is on $GITHUB_SHA already."
-          else
-            echo "::error::The tag $TAG is on $tagged, not on $GITHUB_SHA."
-            exit 1
-          fi
-          if current=$(crane digest "$IMAGE:$TAG" 2> /dev/null); then
-            if [ "$current" != "$digest" ]; then
-              echo "::error::$IMAGE:$TAG is $current, not $digest."
-              exit 1
-            fi
-            echo "$IMAGE:$TAG is $digest already."
-          else
-            crane tag "$IMAGE@$digest" "$TAG"
-          fi
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Release candidate"
-            echo
-            echo "\`$TAG\`: \`$IMAGE@$digest\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: npm package
-        if: inputs.npm-package != ''
-        working-directory: ${{ inputs.npm-package }}
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-          NODE_AUTH_TOKEN: ${{ github.token }}
-        run: |
-          version="${TAG#v}"
-          name=$(node -p 'require("./package.json").name')
-          # npm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
-          # shellcheck disable=SC2016
-          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
-            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
-          npm pkg set "version=$version"
-          # npm packs the same bytes from the same files, so integrities compare.
-          ours=$(npm pack --dry-run --json --ignore-scripts | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].integrity')
-          if theirs=$(npm view "$name@$version" dist.integrity 2> /dev/null) && [ -n "$theirs" ]; then
-            if [ "$theirs" != "$ours" ]; then
-              echo "::error::$name@$version is published with other contents ($theirs, not $ours)."
-              exit 1
-            fi
-            echo "$name@$version is published already, with these contents."
-            exit 0
-          fi
-          npm publish --tag rc --ignore-scripts
 
       - name: vault
         id: vault
@@ -230,6 +192,116 @@ jobs:
           token: ${{ steps.promoter.outputs.token }}
           persist-credentials: false
 
+      # Where the next promotion starts: the promotion still open, which the
+      # merge queue has not merged yet, else main. A second image whose paths
+      # did not change is pinned as it is there, not as main's older pin.
+      - name: staging pin
+        if: env.EXTRA_IMAGES != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.promoter.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = 'gitops';
+            const path = `apps/${process.env.APP}/staging/kustomization.yaml`;
+            const prefix = `chore/promote-${process.env.APP}-staging-`;
+            const open = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base: 'main' });
+            const pr = open
+              .filter((p) => p.head.ref.startsWith(prefix) && p.user.login === '0xc0-labs-promoter[bot]')
+              .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+            const ref = pr ? pr.head.sha : 'main';
+            core.info(`Staging's pin, as of ${pr ? `#${pr.number}` : 'main'}.`);
+            const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/staging-pin.yaml`, Buffer.from(data.content, 'base64'));
+
+      # One line a image, `<image> <digest>`: the image built for this commit,
+      # or, for a second image whose paths did not change and so was not
+      # built, the digest staging pins.
+      - name: digests
+        working-directory: _gitops
+        run: |
+          mise trust --quiet
+          mise install yq
+          : > "$RUNNER_TEMP/digests"
+          for image in $IMAGES; do
+            if digest=$(crane digest "$image:sha-${GITHUB_SHA::7}" 2> "$RUNNER_TEMP/crane.err"); then
+              echo "$image: built for this commit."
+            elif [ "$image" != "$IMAGE" ] && grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN' "$RUNNER_TEMP/crane.err"; then
+              digest=$(IMAGE=$image mise exec yq -- yq '.images[] | select(.name == strenv(IMAGE)) | .digest // ""' "$RUNNER_TEMP/staging-pin.yaml")
+              if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::$image is not built for this commit, and staging pins no digest of it."
+                exit 1
+              fi
+              echo "$image: not built for this commit, so staging's $digest."
+            else
+              cat "$RUNNER_TEMP/crane.err"
+              echo "::error::No image $image:sha-${GITHUB_SHA::7}: the image job runs first."
+              exit 1
+            fi
+            echo "$image $digest" >> "$RUNNER_TEMP/digests"
+          done
+
+      - name: tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          tagged=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
+          if [ -z "$tagged" ]; then
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+          elif [ "$tagged" = "$GITHUB_SHA" ]; then
+            echo "The tag $TAG is on $GITHUB_SHA already."
+          else
+            echo "::error::The tag $TAG is on $tagged, not on $GITHUB_SHA."
+            exit 1
+          fi
+          while read -r image digest <&3; do
+            if current=$(crane digest "$image:$TAG" 2> /dev/null); then
+              if [ "$current" != "$digest" ]; then
+                echo "::error::$image:$TAG is $current, not $digest."
+                exit 1
+              fi
+              echo "$image:$TAG is $digest already."
+            else
+              crane tag "$image@$digest" "$TAG"
+            fi
+          done 3< "$RUNNER_TEMP/digests"
+          {
+            echo "### Release candidate"
+            echo
+            while read -r image digest; do
+              echo "- \`$TAG\`: \`$image@$digest\`"
+            done < "$RUNNER_TEMP/digests"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: npm package
+        if: inputs.npm-package != ''
+        working-directory: ${{ inputs.npm-package }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          name=$(node -p 'require("./package.json").name')
+          # npm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
+          # shellcheck disable=SC2016
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
+          npm pkg set "version=$version"
+          # npm packs the same bytes from the same files, so integrities compare.
+          ours=$(npm pack --dry-run --json --ignore-scripts | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].integrity')
+          if theirs=$(npm view "$name@$version" dist.integrity 2> /dev/null) && [ -n "$theirs" ]; then
+            if [ "$theirs" != "$ours" ]; then
+              echo "::error::$name@$version is published with other contents ($theirs, not $ours)."
+              exit 1
+            fi
+            echo "$name@$version is published already, with these contents."
+            exit 0
+          fi
+          npm publish --tag rc --ignore-scripts
+
       # yq rewrites the values; only those changes reach the file, through a
       # patch that ignores the blank lines yq drops. It pins gitops' head as of
       # now, not as of the checkout: the merge queue merges the previous
@@ -240,7 +312,6 @@ jobs:
         working-directory: _gitops
         env:
           VERSION: ${{ steps.version.outputs.tag }}
-          DIGEST: ${{ steps.tag.outputs.digest }}
           GH_TOKEN: ${{ steps.promoter.outputs.token }}
         run: |
           pin="apps/$APP/staging/kustomization.yaml"
@@ -256,8 +327,10 @@ jobs:
             [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
             mise trust --quiet
             mise install yq
-            yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
-              { echo "::error file=$pin::No images entry named $IMAGE."; exit 1; }
+            for image in $IMAGES; do
+              IMAGE=$image yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
+                { echo "::error file=$pin::No images entry named $image."; exit 1; }
+            done
             current=$(yq '.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION=")) | sub("^APP_VERSION=", "")' "$pin")
             [ -n "$current" ] || { echo "::error file=$pin::No APP_VERSION in the release ConfigMap."; exit 1; }
             if [ "$current" != "$VERSION" ] &&
@@ -266,9 +339,11 @@ jobs:
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            yq '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST)) |
-                (.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' \
-              "$pin" > "$RUNNER_TEMP/pin.yaml"
+            cp "$pin" "$RUNNER_TEMP/pin.yaml"
+            while read -r image digest <&3; do
+              IMAGE=$image DIGEST=$digest yq -i '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST))' "$RUNNER_TEMP/pin.yaml"
+            done 3< "$RUNNER_TEMP/digests"
+            yq -i '(.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' "$RUNNER_TEMP/pin.yaml"
             diff -B -U0 --label "$pin" --label "$pin" "$pin" "$RUNNER_TEMP/pin.yaml" > "$RUNNER_TEMP/pin.diff" || true
             if [ ! -s "$RUNNER_TEMP/pin.diff" ]; then
               echo "Staging is pinned to $VERSION already."
@@ -297,7 +372,6 @@ jobs:
         env:
           ENVIRONMENT: staging
           VERSION: ${{ steps.version.outputs.tag }}
-          DIGEST: ${{ steps.tag.outputs.digest }}
           PIN: ${{ steps.pin.outputs.path }}
           BASE: ${{ steps.pin.outputs.base }}
           TITLE: "chore(${{ inputs.app }}): promote ${{ steps.version.outputs.tag }} to staging"
@@ -307,7 +381,8 @@ jobs:
           github-token: ${{ steps.promoter.outputs.token }}
           script: |
             const fs = require('fs');
-            const { APP, IMAGE, ENVIRONMENT, VERSION, DIGEST, PIN, BASE, TITLE, LINK, AUTO_MERGE } = process.env;
+            const { APP, ENVIRONMENT, VERSION, PIN, BASE, TITLE, LINK, AUTO_MERGE, RUNNER_TEMP } = process.env;
+            const digests = fs.readFileSync(`${RUNNER_TEMP}/digests`, 'utf8').trim().split('\n').map((line) => line.split(' '));
             const owner = context.repo.owner;
             const repo = 'gitops';
             const prefix = `chore/promote-${APP}-${ENVIRONMENT}-`;
@@ -348,8 +423,8 @@ jobs:
             if (pr) {
               const { data } = await github.rest.repos.getContent({ owner, repo, path: PIN, ref: pr.head.sha });
               const pinned = Buffer.from(data.content, 'base64').toString();
-              if (!pinned.includes(`digest: ${DIGEST}`) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
-                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${DIGEST}.`);
+              if (!digests.every(([, digest]) => pinned.includes(`digest: ${digest}`)) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
+                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${digests.map(([, digest]) => digest).join(', ')}.`);
                 return;
               }
               // GitHub computes mergeability on demand: null until it has.
@@ -374,7 +449,7 @@ jobs:
                 `\`${APP}\` in ${ENVIRONMENT}: \`${VERSION}\`.`,
                 '',
                 `- Version: \`${VERSION}\``,
-                `- Digest: \`${DIGEST}\`, of \`${IMAGE}\``,
+                ...digests.map(([image, digest]) => `- Digest: \`${digest}\`, of \`${image}\``),
                 `- Tag: ${LINK}`,
                 '',
                 'It merges itself once its checks pass.',

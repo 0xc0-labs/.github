@@ -127,15 +127,25 @@ jobs:
             [ -f "$pin" ] || continue
             version=$(yq '[.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION=")) | sub("^APP_VERSION="; "")] | .[0] // ""' "$pin")
             [ -n "$version" ] || continue
-            read -r count tag < <(yq '[.images[] | select(.name | test("^ghcr\\.io/" + strenv(OWNER) + "/"))] | [length, (.[0].newTag // "")] | join(" ")' "$pin")
-            if [ "$count" != 1 ]; then
-              echo "::error file=$pin::APP_VERSION is $version, and $count images are under ghcr.io/$OWNER/: the application's must be the only one."
+            # The repo's own image is the shortest name; the others are its
+            # second images, named <repo>-<suffix> (README, Application repos).
+            rows=$(yq '[.images[] | select(.name | test("^ghcr\\.io/" + strenv(OWNER) + "/"))] | sort_by(.name | length) | .[] | .name + " " + (.newTag // "")' "$pin")
+            if [ -z "$rows" ]; then
+              echo "::error file=$pin::APP_VERSION is $version, and no image is under ghcr.io/$OWNER/."
               status=1
-            elif [ "$tag" != "$version" ]; then
-              echo "::error file=$pin::APP_VERSION is $version, but the image's newTag is ${tag:-unset}."
-              status=1
-            else
-              echo "$pin: $version"
+              continue
             fi
+            base=${rows%% *}
+            while read -r name tag; do
+              if [ "$name" != "$base" ] && [[ "$name" != "$base"-?* ]]; then
+                echo "::error file=$pin::$name is not the application's: its images under ghcr.io/$OWNER/ are $base and $base-<suffix> alone."
+                status=1
+              elif [ "$tag" != "$version" ]; then
+                echo "::error file=$pin::APP_VERSION is $version, but the newTag of $name is ${tag:-unset}."
+                status=1
+              else
+                echo "$pin: $name $version"
+              fi
+            done <<< "$rows"
           done
           exit $status

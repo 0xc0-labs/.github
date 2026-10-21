@@ -15,6 +15,13 @@ on:
         description: Dockerfile, relative to the repo root.
         type: string
         default: Dockerfile
+      image-suffix:
+        description: >-
+          Names a second image of the repo, built beside its main one from
+          another context: `cms` pushes ghcr.io/<repo>-cms. Empty, the repo's
+          own image, ghcr.io/<repo> (README, Application repos).
+        type: string
+        default: ''
       platforms:
         description: Target platforms, comma separated. The self-hosted runners build their own, linux/amd64, alone.
         type: string
@@ -38,7 +45,7 @@ on:
         default: ''
     outputs:
       image:
-        description: The image's name, with no tag.
+        description: The image's name, with no tag (ghcr.io/<repo>, or with image-suffix ghcr.io/<repo>-<suffix>).
         value: ${{ jobs.image.outputs.image }}
       digest:
         description: The digest of the image built. It is pushed on main only.
@@ -81,22 +88,31 @@ jobs:
       || (github.event.repository.private && '{"group": "0xc0", "labels": ["build"]}' || '"ubuntu-latest"')) }}
     # The same group as node-check's job (README, Concurrency).
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.image-suffix }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 30
     outputs:
-      image: ghcr.io/${{ github.repository }}
+      image: ghcr.io/${{ github.repository }}${{ inputs.image-suffix != '' && format('-{0}', inputs.image-suffix) || '' }}
       digest: ${{ steps.build.outputs.digest || steps.buildctl.outputs.digest }}
     env:
       PUSH: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
-      IMAGE: ghcr.io/${{ github.repository }}
+      IMAGE: ghcr.io/${{ github.repository }}${{ inputs.image-suffix != '' && format('-{0}', inputs.image-suffix) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: image name
+        env:
+          SUFFIX: ${{ inputs.image-suffix }}
+        run: |
+          if [ -n "$SUFFIX" ] && ! [[ "$SUFFIX" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "::error::image-suffix is '$SUFFIX', not lowercase words joined by '-'."
+            exit 1
+          fi
 
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
