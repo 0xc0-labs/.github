@@ -531,7 +531,10 @@ that change its directory, whatever their scope. Since its last release, a
 other commit the patch, unless the repo's `cliff.toml` skips it. The first
 release is 0.1.0. A release is three things, all named for the package:
 
-- the tag `<name>-vX.Y.Z`, on the last commit that changed its directory;
+- the tag `<name>-vX.Y.Z`, on the commit of the run that releases it, after
+  the package's last commit when another change merged in between: GitHub
+  refuses a tag from the job's token on a commit whose workflows differ from
+  `main`'s (#174). The package is built from its own last commit;
 - a GitHub Release of that tag, with the changelog since the one before;
 - `@0xc0-labs/<name>@X.Y.Z` on GitHub Packages, under `latest`.
 
