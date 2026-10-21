@@ -338,6 +338,62 @@ the PR cannot change the rule it is checked by. Once `pin / check` is
 required in `gitops`, a staging promotion that reaches past its pin cannot
 merge itself.
 
+**A second image.** A repo may build one more image from a subdirectory,
+beside its main one (`artistlabco.com`'s Strapi, in `cms/`). It is the same
+application: one version, one rc and one promotion PR cover both.
+
+- **Build**: a second `container-image` job, with `image-suffix: cms`,
+  `context: cms` and `file: cms/Dockerfile`, pushes `ghcr.io/<repo>-cms`,
+  tagged `sha-<7>` and `main`. Its path gate watches that context and
+  Dockerfile alone, so a commit that touches only the front builds no second
+  image, and the reverse. The suffix is lowercase words joined by `-`; the
+  two jobs run apart, and each caches in its own image's `buildcache` tag.
+- **rc and release**: `extra-images: cms` in the caller's `release-candidate`
+  and `release` (space separated for several). Each image is tagged with
+  the version and pinned in the same PR: `newTag` and `digest` of every
+  image, and `APP_VERSION`. The repo's own image must always have been built
+  for the commit. A second image that was not (its paths did not change) keeps
+  its digest: the rc takes the one staging pins, as of the promotion still
+  open if there is one, else of `main`, since the queue merges the previous
+  promotion after its run ended; the release takes the rc's, and with no
+  staging, prod's. It is tagged with the new version all the same. The rc
+  fails when staging pins none: the first rc of a second image needs it built
+  for that commit. A release reads every image's pin in staging, which must
+  all be at the same rc, and checks each rc tag against its digest.
+- **In `gitops`**: an `images:` entry for each, `ghcr.io/0xc0-labs/<repo>` and
+  `ghcr.io/0xc0-labs/<repo>-cms`, both with `newTag` equal to `APP_VERSION`,
+  and no blank line between the entries (yq drops those lines when it
+  rewrites the pin, and a bot's PR that deletes one fails `pin-check`).
+  `pin-check` accepts several images under `ghcr.io/<owner>/` in one pin only
+  when they are the same repo's, the shortest name and that name with a
+  `-<suffix>`; any other mix fails, as does a `newTag` that is not
+  `APP_VERSION`.
+
+```yaml
+# .github/workflows/ci.yml, beside the main image's job
+  image-cms:
+    needs: check
+    permissions:
+      contents: read
+      packages: write
+    uses: 0xc0-labs/.github/.github/workflows/container-image.yml@main
+    with:
+      context: cms
+      file: cms/Dockerfile
+      image-suffix: cms
+  rc:
+    needs: [image, image-cms]
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: 0xc0-labs/.github/.github/workflows/release-candidate.yml@main
+    with:
+      app: artistlabco-com
+      extra-images: cms
+```
+
 ```yaml
 # .github/workflows/ci.yml, of a private application
 on:

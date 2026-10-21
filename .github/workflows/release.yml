@@ -19,6 +19,13 @@ on:
           Empty, nothing is published.
         type: string
         default: ""
+      extra-images:
+        description: >-
+          Suffixes of the repo's second images, space separated, as in
+          release-candidate.yml. Each is tagged and pinned with the repo's
+          own, under one version.
+        type: string
+        default: ''
       runs-on:
         description: >-
           Where the job runs, as JSON. The self-hosted runners by default:
@@ -89,10 +96,24 @@ jobs:
     env:
       APP: ${{ inputs.app }}
       IMAGE: ghcr.io/${{ github.repository }}
+      EXTRA_IMAGES: ${{ inputs.extra-images }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # As in release-candidate.yml.
+      - name: images
+        run: |
+          images=$IMAGE
+          for suffix in $EXTRA_IMAGES; do
+            if ! [[ "$suffix" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "::error::extra-images has '$suffix', not lowercase words joined by '-'."
+              exit 1
+            fi
+            images="$images ${IMAGE}-${suffix}"
+          done
+          echo "IMAGES=$images" >> "$GITHUB_ENV"
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
@@ -114,6 +135,9 @@ jobs:
           auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/docker/config.json"
 
+      # One line a image in $RUNNER_TEMP/digests, `<image> <digest>`. A second
+      # image whose paths did not change was not built: with no staging it
+      # keeps the digest prod pins.
       - name: image
         id: image
         working-directory: _gitops
@@ -123,44 +147,71 @@ jobs:
         run: |
           mise trust --quiet
           mise install yq
+          yq() { mise exec yq -- yq "$@"; }
+          : > "$RUNNER_TEMP/digests"
           if [ "$STAGING" != true ]; then
             if [ -n "$RC" ]; then
               echo "::error::The rc input is '$RC', but an app with no staging has no rc."
               exit 1
             fi
-            image="$IMAGE:sha-${GITHUB_SHA::7}"
-            digest=$(crane digest "$image") ||
-              { echo "::error::No image $image: the image job runs first."; exit 1; }
+            for image in $IMAGES; do
+              if digest=$(crane digest "$image:sha-${GITHUB_SHA::7}" 2> "$RUNNER_TEMP/crane.err"); then
+                echo "$image: built for this commit."
+              elif [ "$image" != "$IMAGE" ] && grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN' "$RUNNER_TEMP/crane.err"; then
+                pin="apps/$APP/prod/kustomization.yaml"
+                [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
+                digest=$(IMAGE=$image yq '.images[] | select(.name == strenv(IMAGE)) | .digest // ""' "$pin")
+                if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                  echo "::error file=$pin::$image is not built for this commit, and prod pins no digest of it."
+                  exit 1
+                fi
+                echo "$image: not built for this commit, so prod's $digest."
+              else
+                cat "$RUNNER_TEMP/crane.err"
+                echo "::error::No image $image:sha-${GITHUB_SHA::7}: the image job runs first."
+                exit 1
+              fi
+              echo "$image $digest" >> "$RUNNER_TEMP/digests"
+            done
             rc=""
-            echo "No staging: the release is $GITHUB_SHA, $digest."
+            echo "No staging: the release is $GITHUB_SHA."
           elif [ -n "$RC" ]; then
             if ! [[ "$RC" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
               echo "::error::The rc input is '$RC', not vX.Y.Z-rc.N."
               exit 1
             fi
-            digest=$(crane digest "$IMAGE:$RC") ||
-              { echo "::error::No image $IMAGE:$RC: the rc named does not exist."; exit 1; }
+            for image in $IMAGES; do
+              digest=$(crane digest "$image:$RC") ||
+                { echo "::error::No image $image:$RC: the rc named does not exist."; exit 1; }
+              echo "$image $digest" >> "$RUNNER_TEMP/digests"
+            done
             rc=$RC
-            echo "The run names $rc, $digest."
+            echo "The run names $rc."
           else
             pin="apps/$APP/staging/kustomization.yaml"
             [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
-            read -r rc digest < <(mise exec yq -- yq '.images[] | select(.name == strenv(IMAGE)) | [.newTag // "", .digest // ""] | join(" ")' "$pin")
-            if ! [[ "${rc:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ && "${digest:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error file=$pin::Staging's pin of $IMAGE is '${rc:-} ${digest:-}', not an rc and its digest."
-              exit 1
-            fi
-            tagged=$(crane digest "$IMAGE:$rc")
-            if [ "$tagged" != "$digest" ]; then
-              echo "::error::$IMAGE:$rc is $tagged, but staging is pinned to $digest."
-              exit 1
-            fi
-            echo "Staging runs $rc, $digest."
+            rc=""
+            for image in $IMAGES; do
+              read -r tag digest < <(IMAGE=$image yq '.images[] | select(.name == strenv(IMAGE)) | [.newTag // "", .digest // ""] | join(" ")' "$pin")
+              [ -n "$rc" ] || rc=${tag:-}
+              if ! [[ "${tag:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ && "${digest:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error file=$pin::Staging's pin of $image is '${tag:-} ${digest:-}', not an rc and its digest."
+                exit 1
+              fi
+              if [ "$tag" != "$rc" ]; then
+                echo "::error file=$pin::Staging pins $image at $tag, but the application at $rc: one version covers every image."
+                exit 1
+              fi
+              tagged=$(crane digest "$image:$rc")
+              if [ "$tagged" != "$digest" ]; then
+                echo "::error::$image:$rc is $tagged, but staging is pinned to $digest."
+                exit 1
+              fi
+              echo "$image $digest" >> "$RUNNER_TEMP/digests"
+            done
+            echo "Staging runs $rc."
           fi
-          {
-            echo "rc=$rc"
-            echo "digest=$digest"
-          } >> "$GITHUB_OUTPUT"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
       # The release is the rc's commit, or with no staging the commit pushed,
       # checked out for what follows. Its changelog runs from the release
@@ -218,7 +269,6 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           COMMIT: ${{ steps.version.outputs.commit }}
-          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           tagged=$(git rev-parse -q --verify "refs/tags/$VERSION^{commit}" || true)
           if [ -z "$tagged" ]; then
@@ -230,19 +280,23 @@ jobs:
             echo "::error::The tag $VERSION is on $tagged, not on $COMMIT, the release's commit."
             exit 1
           fi
-          if current=$(crane digest "$IMAGE:$VERSION" 2> /dev/null); then
-            if [ "$current" != "$DIGEST" ]; then
-              echo "::error::$IMAGE:$VERSION is $current, not $DIGEST."
-              exit 1
+          while read -r image digest <&3; do
+            if current=$(crane digest "$image:$VERSION" 2> /dev/null); then
+              if [ "$current" != "$digest" ]; then
+                echo "::error::$image:$VERSION is $current, not $digest."
+                exit 1
+              fi
+              echo "$image:$VERSION is $digest already."
+            else
+              crane tag "$image@$digest" "$VERSION"
             fi
-            echo "$IMAGE:$VERSION is $DIGEST already."
-          else
-            crane tag "$IMAGE@$DIGEST" "$VERSION"
-          fi
+          done 3< "$RUNNER_TEMP/digests"
           {
             echo "### Release"
             echo
-            echo "\`$VERSION\`: \`$IMAGE@$DIGEST\`"
+            while read -r image digest; do
+              echo "- \`$VERSION\`: \`$image@$digest\`"
+            done < "$RUNNER_TEMP/digests"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: GitHub Release
@@ -367,7 +421,6 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           NEWEST: ${{ steps.version.outputs.newest }}
-          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           if [ "$NEWEST" != "$VERSION" ]; then
             echo "::notice::$NEWEST is released after $VERSION, and prod's PR is its own: none for $VERSION."
@@ -379,13 +432,17 @@ jobs:
           pin="apps/$APP/prod/kustomization.yaml"
           [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
           yq() { mise exec yq -- yq "$@"; }
-          yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
-            { echo "::error file=$pin::No images entry named $IMAGE."; exit 1; }
+          for image in $IMAGES; do
+            IMAGE=$image yq -e '.images[] | select(.name == strenv(IMAGE))' "$pin" > /dev/null ||
+              { echo "::error file=$pin::No images entry named $image."; exit 1; }
+          done
           yq -e '.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))' "$pin" > /dev/null ||
             { echo "::error file=$pin::No APP_VERSION in the release ConfigMap."; exit 1; }
-          yq '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST)) |
-              (.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' \
-            "$pin" > "$RUNNER_TEMP/pin.yaml"
+          cp "$pin" "$RUNNER_TEMP/pin.yaml"
+          while read -r image digest <&3; do
+            IMAGE=$image DIGEST=$digest yq -i '(.images[] | select(.name == strenv(IMAGE))) |= (.newTag = strenv(VERSION) | .digest = strenv(DIGEST))' "$RUNNER_TEMP/pin.yaml"
+          done 3< "$RUNNER_TEMP/digests"
+          yq -i '(.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION="))) = "APP_VERSION=" + strenv(VERSION)' "$RUNNER_TEMP/pin.yaml"
           diff -B -U0 --label "$pin" --label "$pin" "$pin" "$RUNNER_TEMP/pin.yaml" > "$RUNNER_TEMP/pin.diff" || true
           if [ ! -s "$RUNNER_TEMP/pin.diff" ]; then
             echo "Prod is pinned to $VERSION already."
@@ -407,7 +464,6 @@ jobs:
         env:
           ENVIRONMENT: prod
           VERSION: ${{ steps.version.outputs.version }}
-          DIGEST: ${{ steps.image.outputs.digest }}
           PIN: ${{ steps.pin.outputs.path }}
           BASE: ${{ steps.pin.outputs.base }}
           TITLE: "chore(${{ inputs.app }}): release ${{ steps.version.outputs.version }} to prod"
@@ -416,7 +472,8 @@ jobs:
           github-token: ${{ steps.promoter.outputs.token }}
           script: |
             const fs = require('fs');
-            const { APP, IMAGE, ENVIRONMENT, VERSION, DIGEST, PIN, BASE, TITLE, LINK } = process.env;
+            const { APP, ENVIRONMENT, VERSION, PIN, BASE, TITLE, LINK, RUNNER_TEMP } = process.env;
+            const digests = fs.readFileSync(`${RUNNER_TEMP}/digests`, 'utf8').trim().split('\n').map((line) => line.split(' '));
             const owner = context.repo.owner;
             const repo = 'gitops';
             const prefix = `chore/promote-${APP}-${ENVIRONMENT}-`;
@@ -428,8 +485,8 @@ jobs:
             if (pr) {
               const { data } = await github.rest.repos.getContent({ owner, repo, path: PIN, ref: pr.head.sha });
               const pinned = Buffer.from(data.content, 'base64').toString();
-              if (!pinned.includes(`digest: ${DIGEST}`) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
-                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${DIGEST}.`);
+              if (!digests.every(([, digest]) => pinned.includes(`digest: ${digest}`)) || !pinned.includes(`APP_VERSION=${VERSION}`)) {
+                core.setFailed(`#${pr.number} is open on ${branch}, but its pin is not ${VERSION} at ${digests.map(([, digest]) => digest).join(', ')}.`);
                 return;
               }
               core.info(`#${pr.number} is open already with this pin.`);
@@ -456,7 +513,7 @@ jobs:
                 `\`${APP}\` in ${ENVIRONMENT}: \`${VERSION}\`.`,
                 '',
                 `- Version: \`${VERSION}\``,
-                `- Digest: \`${DIGEST}\`, of \`${IMAGE}\``,
+                ...digests.map(([image, digest]) => `- Digest: \`${digest}\`, of \`${image}\``),
                 `- Release: ${LINK}`,
                 '',
                 'Merging it is the release to prod.',
