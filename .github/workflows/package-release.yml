@@ -1,5 +1,5 @@
-# Reusable: on a push to main, release one package of a monorepo when its
-# directory has something new (README, Shared packages).
+# Reusable: on a push to main, release the packages of a monorepo whose
+# directories have something new (README, Shared packages).
 #
 # The release's contents are the last commit that changed the directory, not
 # the push's: git-cliff, filtering commits by path, does not see a tag on a
@@ -12,10 +12,18 @@ on:
     inputs:
       directory:
         description: >-
-          The package's directory, relative to the repo root:
-          packages/<name>. Its package.json is named @<owner>/<name>.
+          One package's directory, relative to the repo root:
+          packages/<name>. Its package.json is named @<owner>/<name>. Set
+          this or directories, not both.
         type: string
-        required: true
+        default: ''
+      directories:
+        description: >-
+          Every package's directory, whitespace-separated, as directory
+          takes one. One job decides which have something to release, and
+          the release runs for those alone.
+        type: string
+        default: ''
       runs-on:
         description: >-
           Where the job runs, as JSON. Empty by default: GitHub's runners
@@ -44,21 +52,136 @@ jobs:
   # touches only another package still runs: the job finds a release its last
   # push left undone.
   changes:
+    if: inputs.directories == ''
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group":"0xc0","labels":"0xc0"}') || 'ubuntu-latest') }}
     permissions:
       contents: read
     outputs:
       run: ${{ steps.changes.outputs.run }}
     steps:
+      - name: input
+        env:
+          DIRECTORY: ${{ inputs.directory }}
+        run: |
+          if [ -z "$DIRECTORY" ]; then
+            echo "::error::Set directory or directories."
+            exit 1
+          fi
       - id: changes
         uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
         with:
           skip-paths: ${{ inputs.skip-paths }}
           work-paths: ${{ format('{0}/** {1}', inputs.directory, inputs.work-paths) }}
 
+  # What each release job would decide, for every package at once from one
+  # checkout, so a push with nothing to release runs this job alone.
+  decide:
+    if: inputs.directories != '' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest'
+      || fromJSON(inputs.runs-on != '' && inputs.runs-on
+      || (github.event.repository.private && '{"group": "0xc0", "labels": ["0xc0"]}' || '"ubuntu-latest"')) }}
+    permissions:
+      contents: read
+      packages: read # whether a tagged version was published
+    outputs:
+      matrix: ${{ steps.decide.outputs.matrix }}
+    steps:
+      - name: input
+        env:
+          DIRECTORY: ${{ inputs.directory }}
+        run: |
+          if [ -n "$DIRECTORY" ]; then
+            echo "::error::Set directory or directories, not both."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: node git-cliff
+
+      - name: npm registry
+        run: |
+          # npm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
+          # shellcheck disable=SC2016
+          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
+            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/npmrc" >> "$GITHUB_ENV"
+
+      # The same decision as the release job's version step, which stays the
+      # one that tags: a package has work when its version is bumped, or its
+      # tag has no npm package.
+      - name: decide
+        id: decide
+        env:
+          DIRECTORIES: ${{ inputs.directories }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          work=()
+          for dir in $DIRECTORIES; do
+            dir="${dir%/}"
+            name="${dir##*/}"
+            if ! [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || [ ! -f "$dir/package.json" ]; then
+              echo "::error::'$dir' is not a package's directory: packages/<name>, lowercase, with its package.json."
+              exit 1
+            fi
+            commit=$(git log -1 --format=%H "$GITHUB_SHA" -- "$dir")
+            export GIT_CLIFF__GIT__TAG_PATTERN="^$name-v[0-9]+\.[0-9]+\.[0-9]+\$"
+            export GIT_CLIFF__BUMP__INITIAL_TAG="$name-v0.1.0"
+            releases() { grep -Ex "$name-v[0-9]+\.[0-9]+\.[0-9]+"; }
+            tag=$(git tag --points-at "$commit" --list "$name-v*" --sort=-v:refname | releases | head -n1)
+            if [ -z "$tag" ]; then
+              for later in $(git tag --merged "$GITHUB_SHA" --no-merged "$commit" --list "$name-v*" --sort=-v:refname | releases); do
+                if git diff --quiet "$later" "$commit" -- "$dir"; then
+                  tag=$later
+                  break
+                fi
+              done
+            fi
+            if [ -n "$tag" ]; then
+              package="@$GITHUB_REPOSITORY_OWNER/$name"
+              version="${tag#"$name"-v}"
+              if [ -n "$(npm view "$package@$version" dist.integrity 2> /dev/null || true)" ]; then
+                echo "$name: $tag is published."
+              else
+                echo "$name: $tag has no npm package: release."
+                work+=("$dir")
+              fi
+              continue
+            fi
+            last=$(git tag --merged "$commit" --list "$name-v*" --sort=-v:refname | releases | head -n1)
+            next=$(git cliff --bumped-version --include-path "$dir/**" "${last:+$last..}$commit")
+            if ! [[ "$next" =~ ^$name-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::git-cliff gave '$next', not a version of $name."
+              exit 1
+            fi
+            if [ "$next" = "$last" ]; then
+              echo "$name: nothing since $last bumps its version."
+            else
+              echo "$name: $next is next, after ${last:-none}: release."
+              work+=("$dir")
+            fi
+          done
+          matrix=$(jq -cn '$ARGS.positional' --args ${work[@]+"${work[@]}"})
+          echo "Releasing: $matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   release:
-    needs: changes
-    if: needs.changes.outputs.run == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    name: release ${{ matrix.directory }}
+    needs: [changes, decide]
+    # An empty matrix fails its job, so the list is checked here.
+    if: >-
+      !cancelled() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && (needs.changes.outputs.run == 'true'
+      || needs.decide.result == 'success' && needs.decide.outputs.matrix != '[]')
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(needs.decide.outputs.matrix || format('["{0}"]', inputs.directory)) }}
     runs-on: >-
       ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest'
       || fromJSON(inputs.runs-on != '' && inputs.runs-on
@@ -69,7 +192,7 @@ jobs:
     # One release at a time per package, in order. A newer push replaces one
     # still waiting: it holds the same commits and more.
     concurrency:
-      group: package-release-${{ github.repository }}-${{ inputs.directory }}
+      group: package-release-${{ github.repository }}-${{ matrix.directory }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +203,7 @@ jobs:
       - name: commit
         id: commit
         env:
-          DIRECTORY: ${{ inputs.directory }}
+          DIRECTORY: ${{ matrix.directory }}
         run: |
           dir="${DIRECTORY%/}"
           name="${dir##*/}"

@@ -569,9 +569,15 @@ release is 0.1.0. A release is three things, all named for the package:
 - `@0xc0-labs/<name>@X.Y.Z` on GitHub Packages, under `latest`.
 
 There are no prereleases. **Merged is published**: on every push to `main`,
-after its checks, `package-release` runs once per package, and releases each
-one whose directory has something new. The others are skipped. A failed run
-can be rerun, and finishes what the first left undone. An app's issue that
+after its checks, `package-release` runs once, given every package's directory
+in `directories` (whitespace-separated). One job, `decide`, reads them all from
+one checkout and lists those with something to release: a bumped version, or a
+tag whose npm package was never published. The release then runs as one job
+per listed package, named `release <directory>`, and not at all when the list
+is empty, so a push that changes nothing runs one job. `directory`, for a
+single package, still works, and runs the release check and the release for
+that one alone; a caller sets one input or the other. A failed run can be
+rerun, and finishes what the first left undone. An app's issue that
 waits on a package's change turns workable when that change merges, so its
 version exists by the time the app's session starts. Apps pin versions, so a
 release changes nothing an app runs until its pin moves.
@@ -620,14 +626,12 @@ jobs:
     permissions:
       contents: write
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        # Every package, added in the PR that creates it.
-        package: [observability]
     uses: 0xc0-labs/.github/.github/workflows/package-release.yml@main
     with:
-      directory: packages/${{ matrix.package }}
+      # Every package, added in the PR that creates it.
+      directories: >-
+        packages/observability
+        packages/payload-client
 ```
 
 **Reading one, from an app.** No secret in any repo: each place gets a token
