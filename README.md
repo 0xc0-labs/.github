@@ -599,8 +599,19 @@ What `packages` brings: a `cliff.toml`; `node`, `pnpm` and `git-cliff` in its
   before it packs.
 - `files`, what it publishes, and a `build` script when it compiles: the
   workflow runs it before packing, at the release's commit.
+- `exports`, its entry points, each pointing into the built output: never
+  `main` or `types`. A library's are the subpaths an app imports; a Strapi
+  plugin's are the ones Strapi reads.
+- `type`: `module` for a library. A Strapi plugin has none, so it is
+  CommonJS, as `strapi-plugin init` emits it.
+- `dependencies` pinned exactly. What an app must share with the package,
+  one runtime instance of a library or its Strapi, is a `peerDependency`.
 - No `workspace:` dependency on another package of the repo: it would be
   published with that one's committed `0.0.0`.
+
+A Strapi plugin differs in how it is built, which peers it pins and how they
+are ranged: `packages`' README,
+[Strapi plugins](https://github.com/0xc0-labs/packages/blob/main/README.md#strapi-plugins).
 
 Its checks run on the `build` runners, the default of `node-check` in a
 private repo, and its releases on the org's runners, group `0xc0`, the
@@ -627,6 +638,14 @@ jobs:
     uses: 0xc0-labs/.github/.github/workflows/node-check.yml@main
     with:
       test: true
+      coverage: true
+  coverage:
+    needs: check
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: 0xc0-labs/.github/.github/workflows/coverage-comment.yml@main
   release:
     needs: check
     if: github.event_name == 'push'
