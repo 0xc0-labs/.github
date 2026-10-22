@@ -852,6 +852,11 @@ private one, and `--metrics=off` keeps telemetry off.
   - The selection relies on the rule files' layout (each rule opening with
     `- id:`); the job fails if it selects none, and a bump of `rules-ref`
     checks the count it prints.
+- **What it scans.** A pull request scans the files it changes and fails only
+  on the findings it brings in (`--baseline-commit` on the PR's base, fetched
+  because the checkout is shallow); a push to main and a merge group scan the
+  whole repo, so nothing slips past main. When the base cannot be fetched, the
+  scan is whole. The job summary says which one ran (.github#178).
 - **The licence** is the Semgrep Rules License v1.0: the rules may be used
   "only for your own internal business purposes", and not distributed or made
   available to others as a service. A scan of our own code in our own CI is
