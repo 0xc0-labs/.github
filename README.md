@@ -236,8 +236,9 @@ exactly as before.
 | any other | empty |
 
 **Empty means check everything.** It is empty too for a first push (an
-all-zero `before`), for a base GitHub cannot compare, such as a force-push's,
-and for a base that cannot be fetched.
+all-zero `before`) and for a base that cannot be fetched. A force-push's
+`before` is used when it can be fetched; `main`'s ruleset forbids
+force-pushes.
 
 - **A script that narrows to it** checks everything when a file outside the
   packages changes: the lockfile, a root config, `mise.toml`. Those change
