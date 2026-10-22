@@ -1,7 +1,8 @@
 # Reusable: Semgrep Community Edition over the caller's repo, with the engine
 # from the caller's mise.toml and a pinned commit of semgrep/semgrep-rules.
-# Only the rules whose metadata category is security run. No login, no
-# telemetry; a finding fails the job (README, Semgrep).
+# Only the rules whose metadata category is security run, and only those of
+# the languages the scanned files have. No login, no telemetry; a finding
+# fails the job (README, Semgrep).
 #
 # Not named release*: that glob is the Vault role the release jobs log in
 # with, and this one logs in nowhere. A public repo's jobs run on GitHub's
@@ -82,21 +83,108 @@ jobs:
         with:
           install_args: ${{ inputs.tools }}
 
+      # A pull request's scan reads what it changes and fails on what it
+      # brings in; main and a merge group read everything, so nothing slips
+      # past main (README, Semgrep). A PR's checkout is a depth-1 merge
+      # commit, and Semgrep needs a merge base: one more level brings in its
+      # first parent, the base the merge was built on. Without it the scan is
+      # whole.
+      - name: list the files to scan
+        env:
+          IS_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+        run: |
+          scope="the whole repo"
+          base=""
+          if [ "$IS_PULL_REQUEST" = true ] && git fetch --no-tags --deepen=1 --quiet origin \
+            && base=$(git rev-parse --verify --quiet 'HEAD^1'); then
+            # Semgrep refuses a baseline over a dirty tree: the rules checkout is untracked
+            echo "/.semgrep-rules/" >> "$(git rev-parse --git-path info/exclude)"
+            scope="the files this pull request changes"
+            git diff --name-only -z --diff-filter=d "$base" HEAD > "$RUNNER_TEMP/scanned-files"
+          else
+            base=""
+            git ls-files -z > "$RUNNER_TEMP/scanned-files"
+          fi
+          {
+            echo "SEMGREP_SCOPE=$scope"
+            echo "SEMGREP_BASE=$base"
+          } >> "$GITHUB_ENV"
+
+      # Loading the rules is nearly all of a scan's time (Python parses and
+      # validates each one, .github#184), so a scan loads only the rule-sets
+      # whose languages its files have (README, Semgrep).
+      #
       # Several directories mix security with style, best-practice and
       # framework rules, so rules are chosen one by one, not by directory.
       # The rule files are laid out the same way, each rule opening with
       # "  - id:" (README, Semgrep).
       - name: select security rules
+        id: select
         run: |
           # shellcheck disable=SC2086 # RULE_SETS is a list of names, one argument each
-          python - "$RUNNER_TEMP/security-rules" $RULE_SETS <<'PY'
+          python - "$RUNNER_TEMP/security-rules" "$RUNNER_TEMP/scanned-files" $RULE_SETS <<'PY'
           import os, re, sys
 
-          dst, sets = sys.argv[1], sys.argv[2:]
+          dst, listing, sets = sys.argv[1], sys.argv[2], sys.argv[3:]
+
+          # The extensions Semgrep gives each rule-set's languages, plus the
+          # template files the generic rules of `javascript` and `python`
+          # read (their `paths.include`). Every github-actions rule reads
+          # YAML but one, shai-hulud's, pinned to a path. A rule-set not
+          # named here is always loaded.
+          SCRIPT = {"js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"}
+          TEMPLATE = {"html", "ejs", "pug", "hbs", "mustache", "twig", "vue"}
+          YAML = {"yml", "yaml"}
+          EXTENSIONS = {
+              "typescript": SCRIPT,
+              "javascript": SCRIPT | TEMPLATE,
+              "terraform": {"tf", "hcl", "tfvars"},
+              "yaml/kubernetes": YAML,
+              "yaml/github-actions": YAML,
+              "dockerfile": YAML | {"dockerfile", "containerfile"},
+              "bash": {"sh", "bash", "zsh", "ksh"},
+              "python": {"py", "pyi", "pyw", "html"},
+          }
+          # What a file with a shebang and no known extension is read as.
+          INTERPRETERS = [
+              (re.compile(rb"python"), {"python"}),
+              (re.compile(rb"\b(node|deno|bun|tsx)\b"), {"javascript", "typescript"}),
+              (re.compile(rb"\b(sh|bash|zsh|ksh|dash|ash)\b"), {"bash"}),
+          ]
+          ANY_SCRIPT = {"bash", "python"}
+
+          def rule_sets_of(path):
+              name = os.path.basename(path).lower()
+              ext = name.rsplit(".", 1)[-1] if "." in name.strip(".") else ""
+              found = {s for s in sets if s in EXTENSIONS and ext in EXTENSIONS[s]}
+              if name.startswith(("dockerfile", "containerfile")) and "dockerfile" in sets:
+                  found.add("dockerfile")
+              if found or not os.path.isfile(path):
+                  return found
+              try:
+                  with open(path, "rb") as f:
+                      first = f.readline(256)
+              except OSError:
+                  return ANY_SCRIPT & set(sets)
+              if not first.startswith(b"#!"):
+                  return found
+              for pattern, wanted in INTERPRETERS:
+                  if pattern.search(first):
+                      return wanted & set(sets)
+              return ANY_SCRIPT & set(sets)
+
+          needed = {s for s in sets if s not in EXTENSIONS}
+          for path in open(listing, "rb").read().decode(errors="replace").split("\0"):
+              if path:
+                  needed |= rule_sets_of(path)
+          loaded = [s for s in sets if s in needed]
+
           start = re.compile(r"^ {0,2}- id: ")
           security = re.compile(r"^\s+category:\s*security\s*$", re.M)
           kept = left_out = 0
-          for rule_set in sets:
+          counts = []
+          for rule_set in loaded:
+              before = kept
               for dirpath, _, files in os.walk(os.path.join(".semgrep-rules", rule_set)):
                   for name in files:
                       if not name.endswith((".yaml", ".yml")):
@@ -113,33 +201,27 @@ jobs:
                           os.makedirs(os.path.dirname(out), exist_ok=True)
                           with open(out, "w") as f:
                               f.write("rules:\n" + "".join(wanted))
+              counts.append(f"{rule_set} ({kept - before})")
           print(f"security rules: {kept}, left out: {left_out}")
-          if kept == 0:
+          print("rule-sets loaded: " + (", ".join(counts) or "none"))
+          if loaded and kept == 0:
               sys.exit("no security rule selected")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"SEMGREP_RULE_SETS={', '.join(counts)}\n")
+              f.write(f"SEMGREP_RULES={kept}\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"run={'true' if loaded else 'false'}\n")
           PY
 
-      # A pull request's scan reads what it changes and fails on what it
-      # brings in; main and a merge group read everything, so nothing slips
-      # past main (README, Semgrep). A PR's checkout is a depth-1 merge
-      # commit, and Semgrep needs a merge base: one more level brings in its
-      # first parent, the base the merge was built on. Without it the scan is
-      # whole.
       - name: scan
-        env:
-          IS_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+        if: steps.select.outputs.run == 'true'
         run: |
           # Findings are read from the JSON, which leaves out what a nosemgrep
           # waives; the exit code is the verdict.
-          scope="the whole repo"
           baseline=()
-          if [ "$IS_PULL_REQUEST" = true ] && git fetch --no-tags --deepen=1 --quiet origin \
-            && base=$(git rev-parse --verify --quiet 'HEAD^1'); then
-            # Semgrep refuses a baseline over a dirty tree: the rules checkout is untracked
-            echo "/.semgrep-rules/" >> "$(git rev-parse --git-path info/exclude)"
-            baseline=(--baseline-commit "$base")
-            scope="the files this pull request changes"
+          if [ -n "$SEMGREP_BASE" ]; then
+            baseline=(--baseline-commit "$SEMGREP_BASE")
           fi
-          echo "SEMGREP_SCOPE=$scope" >> "$GITHUB_ENV"
           status=0
           semgrep scan --metrics=off --disable-version-check --error --time \
             --json-output="$RUNNER_TEMP/semgrep.json" --exclude .semgrep-rules \
@@ -152,6 +234,11 @@ jobs:
           {
             echo "## Semgrep"
             echo "Scanned $SEMGREP_SCOPE."
+            if [ -z "${SEMGREP_STATUS:-}" ]; then
+              echo "No rule-set applies to them: Semgrep did not run."
+              exit 0
+            fi
+            echo "Rule-sets loaded, with their security rules: $SEMGREP_RULE_SETS. Total: $SEMGREP_RULES."
             count=$(jq '.results | length' "$RUNNER_TEMP/semgrep.json")
             if [ "$count" = 0 ]; then
               echo "No findings."
@@ -163,4 +250,4 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: verdict
-        run: exit "$SEMGREP_STATUS"
+        run: exit "${SEMGREP_STATUS:-0}"
