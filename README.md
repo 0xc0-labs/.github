@@ -387,14 +387,14 @@ application: one version, one rc and one promotion PR cover both.
 - **rc and release**: `extra-images: cms` in the caller's `release-candidate`
   and `release` (space separated for several). Each image is tagged with
   the version and pinned in the same PR: `newTag` and `digest` of every
-  image, and `APP_VERSION`. The repo's own image must always have been built
-  for the commit. A second image that was not (its paths did not change) keeps
-  its digest: the rc takes the one staging pins, as of the promotion still
-  open if there is one, else of `main`, since the queue merges the previous
-  promotion after its run ended; the release takes the rc's, and with no
-  staging, prod's. It is tagged with the new version all the same. The rc
-  fails when staging pins none: the first rc of a second image needs it built
-  for that commit. A release reads every image's pin in staging, which must
+  image, and `APP_VERSION`. At least one image must have been built for the
+  commit. Any image that was not (its paths did not change, so its gate
+  skipped it, the repo's own included) keeps its digest: the rc takes the one
+  staging pins, as of the promotion still open if there is one, else of
+  `main`, since the queue merges the previous promotion after its run ended;
+  the release takes the rc's, and with no staging, prod's. It is tagged with
+  the new version all the same. The rc fails when staging pins none: the first
+  rc of an image needs it built for that commit. A release reads every image's pin in staging, which must
   all be at the same rc, and checks each rc tag against its digest.
 - **In `gitops`**: an `images:` entry for each, `ghcr.io/0xc0-labs/<repo>` and
   `ghcr.io/0xc0-labs/<repo>-cms`, both with `newTag` equal to `APP_VERSION`,

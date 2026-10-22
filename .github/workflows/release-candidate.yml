@@ -193,10 +193,9 @@ jobs:
           persist-credentials: false
 
       # Where the next promotion starts: the promotion still open, which the
-      # merge queue has not merged yet, else main. A second image whose paths
-      # did not change is pinned as it is there, not as main's older pin.
+      # merge queue has not merged yet, else main. An image the push did not
+      # build is pinned as it is there, not as main's older pin.
       - name: staging pin
-        if: env.EXTRA_IMAGES != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.promoter.outputs.token }}
@@ -215,19 +214,22 @@ jobs:
             const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
             fs.writeFileSync(`${process.env.RUNNER_TEMP}/staging-pin.yaml`, Buffer.from(data.content, 'base64'));
 
-      # One line a image, `<image> <digest>`: the image built for this commit,
-      # or, for a second image whose paths did not change and so was not
-      # built, the digest staging pins.
+      # One line an image, `<image> <digest>`: the image built for this
+      # commit or, for any image the push did not build (its gate skipped it),
+      # the digest staging pins. At least one is built: an rc follows a push
+      # that built something.
       - name: digests
         working-directory: _gitops
         run: |
           mise trust --quiet
           mise install yq
           : > "$RUNNER_TEMP/digests"
+          built=0
           for image in $IMAGES; do
             if digest=$(crane digest "$image:sha-${GITHUB_SHA::7}" 2> "$RUNNER_TEMP/crane.err"); then
               echo "$image: built for this commit."
-            elif [ "$image" != "$IMAGE" ] && grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN' "$RUNNER_TEMP/crane.err"; then
+              built=$(( built + 1 ))
+            elif grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN' "$RUNNER_TEMP/crane.err"; then
               digest=$(IMAGE=$image mise exec yq -- yq '.images[] | select(.name == strenv(IMAGE)) | .digest // ""' "$RUNNER_TEMP/staging-pin.yaml")
               if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
                 echo "::error::$image is not built for this commit, and staging pins no digest of it."
@@ -236,11 +238,15 @@ jobs:
               echo "$image: not built for this commit, so staging's $digest."
             else
               cat "$RUNNER_TEMP/crane.err"
-              echo "::error::No image $image:sha-${GITHUB_SHA::7}: the image job runs first."
+              echo "::error::Cannot read $image:sha-${GITHUB_SHA::7}."
               exit 1
             fi
             echo "$image $digest" >> "$RUNNER_TEMP/digests"
           done
+          if [ "$built" -eq 0 ]; then
+            echo "::error::No image of this repo was built for ${GITHUB_SHA::7}: the image job runs first, and an rc follows a push that built one."
+            exit 1
+          fi
 
       - name: tag
         env:
