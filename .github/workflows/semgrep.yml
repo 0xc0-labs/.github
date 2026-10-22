@@ -118,19 +118,40 @@ jobs:
               sys.exit("no security rule selected")
           PY
 
+      # A pull request's scan reads what it changes and fails on what it
+      # brings in; main and a merge group read everything, so nothing slips
+      # past main (README, Semgrep). A PR's checkout is a depth-1 merge
+      # commit, and Semgrep needs a merge base: one more level brings in its
+      # first parent, the base the merge was built on. Without it the scan is
+      # whole.
       - name: scan
+        env:
+          IS_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
         run: |
           # Findings are read from the JSON, which leaves out what a nosemgrep
           # waives; the exit code is the verdict.
+          scope="the whole repo"
+          baseline=()
+          if [ "$IS_PULL_REQUEST" = true ] && git fetch --no-tags --deepen=1 --quiet origin \
+            && base=$(git rev-parse --verify --quiet 'HEAD^1'); then
+            # Semgrep refuses a baseline over a dirty tree: the rules checkout is untracked
+            echo "/.semgrep-rules/" >> "$(git rev-parse --git-path info/exclude)"
+            baseline=(--baseline-commit "$base")
+            scope="the files this pull request changes"
+          fi
+          echo "SEMGREP_SCOPE=$scope" >> "$GITHUB_ENV"
           status=0
-          semgrep scan --metrics=off --disable-version-check --error \
-            --json-output="$RUNNER_TEMP/semgrep.json" --exclude .semgrep-rules --config "$RUNNER_TEMP/security-rules" . || status=$?
+          semgrep scan --metrics=off --disable-version-check --error --time \
+            --json-output="$RUNNER_TEMP/semgrep.json" --exclude .semgrep-rules \
+            --config "$RUNNER_TEMP/security-rules" "${baseline[@]}" . || status=$?
           echo "SEMGREP_STATUS=$status" >> "$GITHUB_ENV"
+          jq '.time | {rules_parse_time, profiling_times}' "$RUNNER_TEMP/semgrep.json" || true
 
       - name: summary
         run: |
           {
             echo "## Semgrep"
+            echo "Scanned $SEMGREP_SCOPE."
             count=$(jq '.results | length' "$RUNNER_TEMP/semgrep.json")
             if [ "$count" = 0 ]; then
               echo "No findings."
