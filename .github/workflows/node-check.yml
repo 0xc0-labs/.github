@@ -46,6 +46,10 @@ on:
         description: Globs that always cause a check, even where the central list ignores them (README, Path gates).
         type: string
         default: ''
+    outputs:
+      run:
+        description: "'true' when the check ran, 'false' when its path gate skipped it (README, node-check)."
+        value: ${{ jobs.changes.outputs.run }}
 
 permissions:
   contents: read
