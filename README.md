@@ -894,6 +894,29 @@ private one, and `--metrics=off` keeps telemetry off.
   because the checkout is shallow); a push to main and a merge group scan the
   whole repo, so nothing slips past main. When the base cannot be fetched, the
   scan is whole. The job summary says which one ran (.github#178).
+- **Which rule-sets it loads** (.github#184). Nearly all of a scan's time is
+  Python parsing and validating the rules it loads (about 30 s on GitHub's
+  runners and 93 s on the org's for all 761), whatever the files, so a scan
+  loads only the rule-sets whose languages its files have. The mapping is in
+  the workflow, beside the selection, from the extensions Semgrep gives each
+  rule-set's languages: `typescript` and `javascript` for `.ts`, `.tsx`,
+  `.js`, `.jsx` and their `m`/`c` variants; `terraform` for `.tf`, `.hcl` and
+  `.tfvars`; `yaml/kubernetes`, `yaml/github-actions` and `dockerfile` for
+  any YAML (the last holds a rule for compose files; `dockerfile` also for
+  `Dockerfile*` and `Containerfile*`); `bash` for `.sh`, `.bash`, `.zsh` and
+  `.ksh`; `python` for `.py` and `.pyi`. The generic rules of `javascript`
+  (`.pug`, `.ejs`, `.hbs`, `.mustache`, `.twig`, `.vue`) and of `python`
+  read templates, so `.html` loads both and the others load `javascript`.
+  A file with none of these and a `#!` first line loads what its interpreter
+  says (`python`; `node`, `deno` or `bun`; a shell), and `bash` with `python`
+  when it names none: never no rule-set for a file Semgrep would read. A
+  rule-set in the `rule-sets` input that the mapping does not name is always
+  loaded. A pull request reads its changed files, so it loads few; a push to
+  main and a merge group read every tracked file, so they load the rule-set of
+  every language the repo has. When no file calls for any, Semgrep does not
+  run, and the job passes and says so in its summary, which otherwise names
+  the rule-sets loaded and their rules. A new language is a new entry in the
+  mapping, with its rule-set.
 - **The licence** is the Semgrep Rules License v1.0: the rules may be used
   "only for your own internal business purposes", and not distributed or made
   available to others as a service. A scan of our own code in our own CI is
