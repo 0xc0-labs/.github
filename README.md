@@ -221,6 +221,35 @@ jobs:
   `working-directory` input of `coverage-comment` only keeps comments of
   different runs apart.
 
+`CHECK_BASE` is in the environment of every step of `node-check`'s `check`
+job: the commit the change starts from, the one `changes` compares against,
+so a monorepo's scripts can check only what the change affects
+(`git diff --name-only "$CHECK_BASE"`). The checkout stays shallow: the
+`base` step fetches that one commit. A repo whose scripts ignore it checks
+exactly as before.
+
+| Event | `CHECK_BASE` |
+|---|---|
+| `pull_request` | the PR's base sha |
+| `push` | the push's `before` |
+| `merge_group` | the group's `base_sha` |
+| any other | empty |
+
+**Empty means check everything.** It is empty too for a first push (an
+all-zero `before`), for a base GitHub cannot compare, such as a force-push's,
+and for a base that cannot be fetched.
+
+- **A script that narrows to it** checks everything when a file outside the
+  packages changes: the lockfile, a root config, `mise.toml`. Those change
+  what every package installs or builds, so no package's own diff covers them.
+- **Coverage of a narrowed run** is never the repo's. The script that
+  narrows writes one line, what it covered, to the file named by
+  `CHECK_SCOPE_FILE` (such as `packages changed since <base>: a, b`). With
+  `coverage: true`, the job summary and the PR comment then say `Covers only
+  what the check ran:` followed by that line, and label the total
+  accordingly. A script that narrows and writes nothing leaves the figure
+  looking like the whole repo's: writing the line is part of narrowing.
+
 Where they run:
 
 - **A private application's checks and image** (`payload`,
