@@ -197,12 +197,19 @@ jobs:
       coverage: true
   coverage:
     needs: check
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.check.outputs.run == 'true'
     permissions:
       contents: read
       pull-requests: write
     uses: 0xc0-labs/.github/.github/workflows/coverage-comment.yml@main
 ```
+
+- **The `run` output** of `node-check` is `'true'` when the check ran and
+  `'false'` when its path gate skipped it (Path gates). A job that only makes
+  sense after a check, such as `coverage`, tests it, as above: without it, a PR
+  that changes nothing under `working-directory` still starts that job, which
+  finds no report and takes a runner slot. A caller that does not read it
+  changes nothing.
 
 - **The repo pins** `@vitest/coverage-v8` at its Vitest's exact version, in its
   `package.json`, and configures in `vitest.config` what is measured
