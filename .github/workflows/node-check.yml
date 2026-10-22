@@ -98,6 +98,24 @@ jobs:
       - if: steps.passed.outputs.cache-hit != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Every later step sees the commit the change starts from, the one the
+      # `changes` job compares against (README, node-check, CHECK_BASE).
+      - name: base
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: |
+          case $GITHUB_EVENT_NAME in
+            pull_request | pull_request_target) base=$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH") ;;
+            push) base=$(jq -r '.before // empty' "$GITHUB_EVENT_PATH") ;;
+            merge_group) base=$(jq -r '.merge_group.base_sha // empty' "$GITHUB_EVENT_PATH") ;;
+            *) base= ;;
+          esac
+          if [ -z "${base//0/}" ] || ! git fetch --quiet --depth=1 origin "$base" 2> /dev/null; then
+            base=
+          fi
+          echo "CHECK_BASE=$base" >> "$GITHUB_ENV"
+          echo "CHECK_SCOPE_FILE=$RUNNER_TEMP/check-scope.txt" >> "$GITHUB_ENV"
+          echo "CHECK_BASE=${base:-(empty: check everything)}"
+
       - if: steps.passed.outputs.cache-hit != 'true'
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
@@ -144,14 +162,12 @@ jobs:
       - name: coverage
         id: coverage
         if: steps.passed.outputs.cache-hit != 'true' && inputs.test && inputs.coverage
-        env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
           mkdir -p "$RUNNER_TEMP/coverage-report"
           changed="$RUNNER_TEMP/changed.txt"
           : > "$changed"
-          if [ -n "${BASE_SHA//0/}" ] && git fetch --quiet --depth=1 origin "$BASE_SHA" 2> /dev/null; then
-            git diff --name-only "$BASE_SHA" HEAD > "$changed"
+          if [ -n "$CHECK_BASE" ]; then
+            git diff --name-only "$CHECK_BASE" HEAD > "$changed"
           fi
           CHANGED_LIST="$changed" node --input-type=module <<'EOF'
           import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -168,6 +184,11 @@ jobs:
           const cell = (m) => `${m.pct}% (${m.covered}/${m.total})`
           const row = (name, d) => `| ${name} | ${cell(d.lines)} | ${cell(d.branches)} | ${cell(d.functions)} | ${cell(d.statements)} |`
           const clean = (name) => name.replace(/[`|\r\n]/g, '?')
+          // Written by a repo script that narrowed the run (README, node-check, CHECK_BASE).
+          const scopeFile = process.env.CHECK_SCOPE_FILE
+          const scope = scopeFile && existsSync(scopeFile)
+            ? clean(readFileSync(scopeFile, 'utf8').split('\n')[0].trim()).slice(0, 300)
+            : ''
 
           const files = Object.entries(summary)
             .filter(([name]) => name !== 'total')
@@ -179,9 +200,10 @@ jobs:
           const lines = [
             '### Test coverage',
             '',
+            ...(scope ? [`Covers only what the check ran: ${scope}`, ''] : []),
             '| | Lines | Branches | Functions | Statements |',
             '|---|---|---|---|---|',
-            row('**Total**', summary.total),
+            row(scope ? '**Total of what ran**' : '**Total**', summary.total),
             ...shown.map(([name, data]) => row('`' + clean(name) + '`', data)),
           ]
           if (files.length > shown.length) lines.push('', `${files.length - shown.length} more changed files not shown.`)
