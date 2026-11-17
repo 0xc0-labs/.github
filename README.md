@@ -15,7 +15,7 @@ scripts/tofu               runs tofu on an environment, secrets read from Vault 
 mise.toml                  pinned tool versions
 .github/actions/changes/   composite action: did the push, PR or merge group change anything a workflow cares about
 .github/workflows/
-  tofu-plan.yml            reusable: fmt, validate, plan, comment on the PR
+  tofu-plan.yml            reusable: fmt, module READMEs in sync, validate, plan, comment on the PR
   tofu-apply.yml           reusable: apply inside an approval-gated environment
   pr-issue.yml             reusable: fail a PR that links no issue, unless one of the org's Apps opened it
   spec-first.yml           reusable: fail a PR that closes a Feature issue unless its first commit adds only the spec document, `spec/*.md`
@@ -56,7 +56,9 @@ environments/<env>/        root: backend.tf, main.tf, terraform.tfvars
 - Root values go in `terraform.tfvars`. Secrets come from the environment.
   `bootstrap` is the one exception: command line only, never committed.
 - The inputs/outputs section of a module README is generated:
-  `mise run docs`.
+  `mise run docs`. The plan fails, in every repo that plans through
+  `tofu-plan.yml`, when it was not regenerated: its `docs` step names the
+  README that differs.
 - A `moved`, `import` or `removed` block is removed in a later PR, once its
   apply is done and the plan shows no changes.
 
@@ -837,7 +839,7 @@ workflow ships it (a package's README is in the package):
 | `semgrep`, `ansible`, `packer`, `tofu-apply`, `package-release`, `release-candidate`, `release` | whatever the central list does not ignore. `ansible` and `packer` then pick the playbooks and templates the change affects. `package-release` also runs on a push to another package, which finds a release left undone, and counts its package's markdown. `release` run by hand always runs |
 | `node-check` | under `working-directory`, plus the root's `mise.toml`, `mise.lock`, `.mise/`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `.npmrc`; with `.`, the whole repo |
 | `container-image` | under `context`, and the `file`; with `.`, the whole repo |
-| `tofu-plan` | what `paths` matches, a regex: `^(environments/\|modules/\|mise\.toml$)` by default |
+| `tofu-plan` | what `paths` matches, a regex: `^(environments/\|modules/\|mise\.toml$)` by default. A module's `README.md` counts too, the central list notwithstanding: the plan checks it is regenerated |
 | `kustomize-validate` | under each glob of `components`, under `manifests`, and under the other children of each glob's parent: for `platform/* apps/*/prod apps/*/staging`, `apps/<app>/base` counts with the environments that include it. Derived by `.github/actions/component-paths`, so a caller sets nothing |
 | `pin-check` | the `pins`. A PR of one of the org's bots is always checked: what a bot may change is what its checks guard |
 | `plugin-version` | under `plugins`, and the `marketplace` file, markdown included |
