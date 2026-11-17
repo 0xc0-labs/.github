@@ -88,6 +88,7 @@ runner_group = {
     "0xc0-labs/.github/.github/workflows/package-release.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/pr-issue.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/odd-first.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/spec-first.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/semgrep.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/coverage-comment.yml@refs/heads/main",
   ]
