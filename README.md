@@ -189,7 +189,7 @@ run fails before it starts.
 
 With `test: true`, `node-check` runs `pnpm test` after the build, on the same
 runner. The tests bring up what they need themselves, and the workflow starts
-no service: `payload`'s start their own PostgreSQL from mise, on a Unix socket
+no service: `artistlabco.com`'s start their own PostgreSQL from mise, on a Unix socket
 in a temporary directory, with nothing listening on the network. `tools`
 carries what they need: `tools: conda:postgresql`.
 
@@ -279,8 +279,7 @@ force-pushes.
 
 Where they run:
 
-- **A private application's checks and image** (`payload`,
-  `artistlabco.com`) run on the org's runners, the `0xc0` group, on those that
+- **A private application's checks and image** (`artistlabco.com`) run on the org's runners, the `0xc0` group, on those that
   carry the label `build`: one per CI VM, so a VM never runs two builds at
   once. The caller passes no `runs-on`: the workflows pick the group from the
   repo's visibility. The light jobs around them, `changes`, `pr-issue`,
@@ -325,8 +324,7 @@ and `apps/<app>/prod/`, each with its pin):
    Commits since the last release (`feat` a minor, `fix` a patch, `!` a
    major, a minor while in 0.x; the first is 0.1.0), N one past the last rc of
    that version. It tags the commit and the image's digest with it, never
-   rebuilding the image, and publishes the npm package, when there is one,
-   as `X.Y.Z-rc.N` under the `rc` dist-tag. Then it opens a PR in `gitops`
+   rebuilding the image. Then it opens a PR in `gitops`
    that changes only staging's pin, closes the older staging PRs still open,
    and sets it to merge itself once its checks pass. A failed run can be
    rerun: on the same commit it reuses its rc, skips what it finds published
@@ -340,21 +338,20 @@ and `apps/<app>/prod/`, each with its pin):
    staging's pin on `gitops`' `main`, checks that the rc's tag names the
    pinned digest, and makes `vX.Y.Z` of it: a tag on the same commit, a
    GitHub Release with `git-cliff`'s changelog since the last release, the
-   same digest tagged `vX.Y.Z`, and the package as `X.Y.Z`. Then it opens
+   same digest tagged `vX.Y.Z`. Then it opens
    prod's PR in `gitops`, which never merges itself: merging it is prod's
    approval. Rolling back is reverting it. A failed run can be rerun, and
    finishes what the first left undone: the tag, the Release, the image's
-   tag, the package and prod's PR are each skipped when they are there and
+   tag and prod's PR are each skipped when they are there and
    match, and fail the run when they differ (the tag on another commit, the
-   image's tag on another digest, the package with other contents, an open
-   PR with another pin).
+   image's tag on another digest, an open PR with another pin).
 
 The delivery, for an application with no staging (`apps/<app>/prod/`
 alone): **every push to `main`** is a release, and merging prod's PR is the
 approval (operator decision, 2026-10-12). After the image, `release`, with
 `staging: false`, releases the commit pushed: the version `git-cliff`
 computes, as for an rc, but with no rc; the image's `sha-<7>` digest tagged
-with it; then the tag, the Release, the package and prod's PR as in 2,
+with it; then the tag, the Release and prod's PR as in 2,
 closing the older prod PRs still open. Nothing of staging is read or
 written. A push releases nothing, and says so in a notice, when a later
 release contains its commit (a rerun, after a newer push released), or when
@@ -376,8 +373,7 @@ through with no linked issue. A pin edit keeps the rest of the file as it is:
 `yq` sets the values, and only those lines change.
 
 What an application brings: a `cliff.toml`; `git-cliff` and `crane` in its
-`mise.toml`, and `node` when it publishes a package, which goes out as
-committed, with no install and no lifecycle scripts; its JWT role in the
+`mise.toml`; its JWT role in the
 `vault` repo; its repo in the runner group; and `gitops`' pins, an `images:`
 entry for `ghcr.io/0xc0-labs/<repo>` and `APP_VERSION` in a `release`
 ConfigMap. `gitops`' `pin-check` keeps those two equal.
@@ -488,8 +484,7 @@ jobs:
       id-token: write
     uses: 0xc0-labs/.github/.github/workflows/release-candidate.yml@main
     with:
-      app: payload
-      npm-package: packages/payload-types
+      app: artistlabco-com
 ```
 
 ```yaml
@@ -513,8 +508,7 @@ jobs:
       id-token: write
     uses: 0xc0-labs/.github/.github/workflows/release.yml@main
     with:
-      app: payload
-      npm-package: packages/payload-types
+      app: artistlabco-com
       rc: ${{ inputs.rc }}
 ```
 
@@ -676,7 +670,7 @@ jobs:
       # Every package, added in the PR that creates it.
       directories: >-
         packages/observability
-        packages/payload-client
+        packages/strapi-plugin-kit
 ```
 
 **Reading one, from an app.** No secret in any repo: each place gets a token

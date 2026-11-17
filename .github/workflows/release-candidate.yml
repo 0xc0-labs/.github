@@ -9,13 +9,6 @@ on:
         description: The application's folder in gitops, apps/<app>/.
         type: string
         required: true
-      npm-package:
-        description: >-
-          Directory of an npm package to publish to GitHub Packages with the
-          rc's version, under the rc dist-tag. It is published as committed:
-          no install, no lifecycle scripts. Empty, nothing is published.
-        type: string
-        default: ""
       extra-images:
         description: >-
           Suffixes of the repo's second images, space separated: `cms` is
@@ -97,7 +90,7 @@ jobs:
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install_args: git-cliff crane${{ inputs.npm-package != '' && ' node' || '' }}
+          install_args: git-cliff crane
 
       - name: version
         id: version
@@ -280,33 +273,6 @@ jobs:
               echo "- \`$TAG\`: \`$image@$digest\`"
             done < "$RUNNER_TEMP/digests"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: npm package
-        if: inputs.npm-package != ''
-        working-directory: ${{ inputs.npm-package }}
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-          NODE_AUTH_TOKEN: ${{ github.token }}
-        run: |
-          version="${TAG#v}"
-          name=$(node -p 'require("./package.json").name')
-          # npm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
-          # shellcheck disable=SC2016
-          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
-            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
-          npm pkg set "version=$version"
-          # npm packs the same bytes from the same files, so integrities compare.
-          ours=$(npm pack --dry-run --json --ignore-scripts | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].integrity')
-          if theirs=$(npm view "$name@$version" dist.integrity 2> /dev/null) && [ -n "$theirs" ]; then
-            if [ "$theirs" != "$ours" ]; then
-              echo "::error::$name@$version is published with other contents ($theirs, not $ours)."
-              exit 1
-            fi
-            echo "$name@$version is published already, with these contents."
-            exit 0
-          fi
-          npm publish --tag rc --ignore-scripts
 
       # yq rewrites the values; only those changes reach the file, through a
       # patch that ignores the blank lines yq drops. It pins gitops' head as of
