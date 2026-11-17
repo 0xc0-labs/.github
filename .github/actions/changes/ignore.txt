@@ -6,5 +6,4 @@
 .claude/**
 **/*.md
 docs/**
-odd/**
 LICENSE
