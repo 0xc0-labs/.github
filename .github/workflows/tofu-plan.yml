@@ -23,9 +23,12 @@ on:
         type: string
         default: ''
       tools:
-        description: mise tools to install. Only these — a broken, unrelated tool in the repo's mise.toml must not block a plan or an apply.
+        description: >-
+          mise tools to install. Only these — a broken, unrelated tool in the
+          repo's mise.toml must not block a plan or an apply. opentofu runs
+          the plan; terraform-docs checks the module READMEs.
         type: string
-        default: opentofu
+        default: opentofu terraform-docs
       runs-on:
         description: >-
           Where the job runs, as JSON. Defaults to the self-hosted runners on
@@ -63,7 +66,7 @@ jobs:
         with:
           paths-regex: ${{ inputs.paths }}
           skip-paths: ${{ inputs.skip-paths }}
-          work-paths: ${{ inputs.work-paths }}
+          work-paths: modules/*/README.md ${{ inputs.work-paths }}
 
   tofu:
     needs: changes
@@ -106,6 +109,16 @@ jobs:
 
       - name: fmt
         run: tofu fmt -check -recursive -no-color
+
+      - name: docs
+        run: |
+          for m in modules/*/; do
+            [ -d "$m" ] && terraform-docs markdown table --output-file README.md --output-mode inject "$m"
+          done
+          if ! git diff --exit-code --stat -- modules; then
+            echo "::error::A module README does not match its code. Run 'mise run docs' and commit the result."
+            exit 1
+          fi
 
       - name: init
         run: |
