@@ -19,6 +19,7 @@ mise.toml                  pinned tool versions
   tofu-apply.yml           reusable: apply inside an approval-gated environment
   pr-issue.yml             reusable: fail a PR that links no issue, unless one of the org's Apps opened it
   odd-first.yml            reusable: fail a PR that closes a Feature issue unless its first commit adds only the ODD feature document, `odd/tasks/*.md`
+  spec-first.yml           reusable: fail a PR that closes a Feature issue unless its first commit adds only the spec document, `spec/*.md`
   packer.yml               reusable: validate Packer templates; rebuild the affected ones, a job per chain, once approved
   hook-tests.yml           reusable: run a repo's hook test cases
   plugin-version.yml       reusable: fail a PR that changes a Claude Code plugin without bumping its version, or whose marketplace entry declares another
@@ -147,9 +148,27 @@ that is a Task or a Bug. Its job is `check`, so a caller named `odd-first`
 reports `odd-first / check`. The caller grants `contents`, `issues` and
 `pull-requests` read, which a `permissions: {}` caller does not.
 
+It stays for `payload` alone, until that repo is retired
+(0xc0-labs/workspace#204); the other repos call `spec-first`.
+
 A private repo on the Free plan cannot require it: rulesets apply only to
-public repos (`modules/repository`'s `visibility`), so on `payload`,
-`artistlabco.com` and `packages` it shows red without blocking the merge.
+public repos (`modules/repository`'s `visibility`), so on `payload` it shows
+red without blocking the merge.
+
+### Spec first
+
+`spec-first` fails a PR whose linked issue is a Feature unless the PR's first
+commit adds only its spec document: one `spec/*.md`, directly in `spec/`, and
+no file outside `spec/` (operator decision, 2026-11-17;
+0xc0-labs/workspace#214). It is `odd-first` with another document: it finds
+the issue, reads its type, and passes in the same cases. Its job is `check`,
+so a caller named `spec-first` reports `spec-first / check`. The caller grants
+`contents`, `issues` and `pull-requests` read, which a `permissions: {}`
+caller does not.
+
+A private repo on the Free plan cannot require it: rulesets apply only to
+public repos (`modules/repository`'s `visibility`), so on `packages` and
+`artistlabco.com` it shows red without blocking the merge.
 
 ### Application repos
 
@@ -847,7 +866,7 @@ workflow ships it (a package's README is in the package):
 | `pin-check` | the `pins`. A PR of one of the org's bots is always checked: what a bot may change is what its checks guard |
 | `plugin-version` | under `plugins`, and the `marketplace` file, markdown included |
 | `hook-tests` | whatever the central list does not ignore, and everything under `plugins/` |
-| `pr-issue`, `odd-first` | always: they check the PR, not the code |
+| `pr-issue`, `odd-first`, `spec-first` | always: they check the PR, not the code |
 
 `tofu-apply` skips only on the central list: a root reads more than
 `environments/` and `modules/`, and the apply re-plans anyway.

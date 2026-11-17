@@ -1,0 +1,63 @@
+# Reusable: fail a Feature PR whose first commit is not its spec document.
+name: spec-first
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group":"0xc0","labels":"0xc0"}') || 'ubuntu-latest') }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: first commit
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            if (context.eventName === 'merge_group') {
+              core.info('A merge group: each of its PRs passed this check.')
+              return
+            }
+            const pr = context.payload.pull_request
+            const author = pr.user.login
+            if (['0xc0-labs-promoter[bot]', '0xc0-labs-renovate[bot]'].includes(author)) {
+              core.info(`Opened by ${author}: no spec document needed.`)
+              return
+            }
+
+            // Same pattern as pr-issue; a link to another repo's issue does not
+            // say what this repo's change is, so only a bare #N or this repo's
+            // counts.
+            const { owner, repo } = context.repo
+            const pattern = /(?:^|[^A-Za-z0-9])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+([\w.-]+\/[\w.-]+)?#(\d+)/gi
+            const link = [...(pr.body ?? '').matchAll(pattern)]
+              .find(([, slug]) => !slug || slug.toLowerCase() === `${owner}/${repo}`.toLowerCase())
+            if (!link) {
+              core.info('No linked issue of this repo: issue / check reports it.')
+              return
+            }
+            const issue_number = Number(link[2])
+
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number })
+            const type = issue.type?.name ?? 'none'
+            if (type !== 'Feature') {
+              core.info(`Issue #${issue_number} is a ${type}, not a Feature: no spec document needed.`)
+              return
+            }
+
+            const { data: [first] } = await github.rest.pulls.listCommits({
+              owner, repo, pull_number: pr.number, per_page: 1,
+            })
+            const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: first.sha })
+            const files = commit.files ?? []
+            const addsDocument = files.some((f) => f.status === 'added' && /^spec\/[^/]+\.md$/.test(f.filename))
+            const outside = files.some((f) => !f.filename.startsWith('spec/'))
+            const short = first.sha.slice(0, 7)
+
+            if (addsDocument && !outside) {
+              core.info(`Issue #${issue_number} is a Feature and the first commit, ${short}, adds its spec document.`)
+              return
+            }
+            core.setFailed(`Issue #${issue_number} is a Feature, so its spec document comes before the code (operator decision, 2026-11-17; 0xc0-labs/workspace#214): the PR's first commit must add a spec/*.md and nothing outside spec/. The first commit, ${short}, does not. Start a new branch whose first commit is the document, then move the code on top of it.`)
