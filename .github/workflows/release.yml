@@ -11,14 +11,6 @@ on:
         description: The application's folder in gitops, apps/<app>/.
         type: string
         required: true
-      npm-package:
-        description: >-
-          Directory of an npm package to publish to GitHub Packages with the
-          release's version, under the latest dist-tag, from the rc's commit.
-          It is published as committed: no install, no lifecycle scripts.
-          Empty, nothing is published.
-        type: string
-        default: ""
       extra-images:
         description: >-
           Suffixes of the repo's second images, space separated, as in
@@ -86,7 +78,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     permissions:
       contents: write # the release's tag and the GitHub Release
-      packages: write # the image's tag and the npm package
+      packages: write # the image's tag
       id-token: write # the Vault login
     # One release at a time per repo, in order. With no staging, a newer push
     # replaces one still waiting: its release includes that commit.
@@ -117,7 +109,7 @@ jobs:
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install_args: git-cliff crane${{ inputs.npm-package != '' && ' node' || '' }}
+          install_args: git-cliff crane
 
       - name: gitops
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -325,33 +317,6 @@ jobs:
               body: fs.readFileSync(`${process.env.RUNNER_TEMP}/changelog.md`, 'utf8'),
             });
             core.setOutput('url', data.html_url);
-
-      - name: npm package
-        if: inputs.npm-package != '' && steps.version.outputs.release == 'true'
-        working-directory: ${{ inputs.npm-package }}
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ github.token }}
-        run: |
-          version="${VERSION#v}"
-          name=$(node -p 'require("./package.json").name')
-          # npm expands ${NODE_AUTH_TOKEN} itself: the token is never written.
-          # shellcheck disable=SC2016
-          printf '%s\n' "@$GITHUB_REPOSITORY_OWNER:registry=https://npm.pkg.github.com" \
-            '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
-          npm pkg set "version=$version"
-          # As in release-candidate.yml.
-          ours=$(npm pack --dry-run --json --ignore-scripts | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8"))[0].integrity')
-          if theirs=$(npm view "$name@$version" dist.integrity 2> /dev/null) && [ -n "$theirs" ]; then
-            if [ "$theirs" != "$ours" ]; then
-              echo "::error::$name@$version is published with other contents ($theirs, not $ours)."
-              exit 1
-            fi
-            echo "$name@$version is published already, with these contents."
-            exit 0
-          fi
-          npm publish --ignore-scripts
 
       - name: vault
         id: vault

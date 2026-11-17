@@ -29,12 +29,12 @@ PATHS=$(component_paths)
 want='platform/*/** apps/*/prod/** apps/*/*/** apps/*/staging/** bootstrap/**'
 if [ "$PATHS" = "$want" ]; then echo "ok   paths"; else echo "FAIL paths: $PATHS"; failed=1; fi
 
-case_ run  apps/payload/prod/kustomization.yaml
-case_ run  apps/payload/base/deployment.yaml
+case_ run  apps/artistlabco-com/prod/kustomization.yaml
+case_ run  apps/artistlabco-com/base/deployment.yaml
 case_ run  platform/traefik/values.yaml
-case_ run  apps/payload/staging/kustomization.yaml
+case_ run  apps/artistlabco-com/staging/kustomization.yaml
 case_ run  bootstrap/prod/x.yaml
-case_ skip apps/payload/README.md
+case_ skip apps/artistlabco-com/README.md
 case_ skip src/index.ts
 
 COMPONENTS='platform/*' MANIFESTS=''
