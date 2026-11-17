@@ -78,7 +78,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     permissions:
       contents: write # the release's tag and the GitHub Release
-      packages: write # the image's tag and the npm package
+      packages: write # the image's tag
       id-token: write # the Vault login
     # One release at a time per repo, in order. With no staging, a newer push
     # replaces one still waiting: its release includes that commit.

@@ -59,7 +59,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs-on) }}
     permissions:
       contents: write # the rc's tag
-      packages: write # the image's tag and the npm package
+      packages: write # the image's tag
       id-token: write # the Vault login
     # One rc at a time per repo, in order. A newer push replaces one still
     # waiting: its own rc includes that commit.
