@@ -115,7 +115,8 @@ jobs:
           for m in modules/*/; do
             [ -d "$m" ] && terraform-docs markdown table --output-file README.md --output-mode inject "$m"
           done
-          if ! git diff --exit-code --stat -- modules; then
+          if [ -n "$(git status --porcelain -- modules)" ]; then
+            git status --short -- modules
             echo "::error::A module README does not match its code. Run 'mise run docs' and commit the result."
             exit 1
           fi
