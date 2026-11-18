@@ -58,6 +58,18 @@ repositories = {
     visibility  = "private"
     auto_init   = true
   }
+  "matchmark" = {
+    description = "Matchmark: a platform to build and run applications made of AI agents"
+    topics      = ["0xc0", "app"]
+    visibility  = "private"
+    auto_init   = true
+  }
+  "matchmark-config" = {
+    description = "Matchmark's definitions for the org's own workspace: applications, agents and workflows"
+    topics      = ["0xc0"]
+    visibility  = "private"
+    auto_init   = true
+  }
 }
 
 # The repos whose CI needs the network, and the applications' jobs that run
@@ -69,7 +81,7 @@ repositories = {
 # to save those minutes; the Next.js builds stay on GitHub's runners for now.
 runner_group = {
   name         = "0xc0"
-  repositories = [".github", "infrastructure", "vault", "artistlabco.com", "packages", "offby1.cc"]
+  repositories = [".github", "infrastructure", "vault", "artistlabco.com", "packages", "offby1.cc", "matchmark", "matchmark-config"]
   workflows = [
     "0xc0-labs/.github/.github/workflows/ansible.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/packer.yml@refs/heads/main",
