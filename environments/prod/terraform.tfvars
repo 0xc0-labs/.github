@@ -88,6 +88,7 @@ runner_group = {
     "0xc0-labs/.github/.github/workflows/tofu-plan.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/tofu-apply.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/node-check.yml@refs/heads/main",
+    "0xc0-labs/.github/.github/workflows/python-check.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/container-image.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/release-candidate.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/release.yml@refs/heads/main",
