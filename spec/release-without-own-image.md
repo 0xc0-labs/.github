@@ -57,9 +57,9 @@ image.
 
 ## Tasks
 
-- [ ] pin-check script and its cases
-- [ ] pin-check workflow calls it
-- [ ] `own-image` in release-candidate
-- [ ] `own-image` in release
-- [ ] README
-- [ ] actionlint and tests green
+- [x] pin-check script and its cases
+- [x] pin-check workflow calls it
+- [x] `own-image` in release-candidate
+- [x] `own-image` in release
+- [x] README
+- [x] actionlint and tests green

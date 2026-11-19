@@ -16,6 +16,13 @@ on:
           tagged and pinned with the repo's own, under one version.
         type: string
         default: ''
+      own-image:
+        description: >-
+          False for an application whose images are all per-service,
+          ghcr.io/<repo>-<suffix>, with none named ghcr.io/<repo>: the repo's
+          own image is left out, and extra-images names every image.
+        type: boolean
+        default: true
       runs-on:
         description: >-
           Where the job runs, as JSON. The self-hosted runners by default:
@@ -70,15 +77,18 @@ jobs:
       APP: ${{ inputs.app }}
       IMAGE: ghcr.io/${{ github.repository }}
       EXTRA_IMAGES: ${{ inputs.extra-images }}
+      OWN_IMAGE: ${{ inputs.own-image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      # IMAGES: the repo's own image first, then its second images.
+      # IMAGES: the repo's own image first, then its second images; with
+      # own-image false, the second images alone.
       - name: images
         run: |
           images=$IMAGE
+          [ "$OWN_IMAGE" = true ] || images=""
           for suffix in $EXTRA_IMAGES; do
             if ! [[ "$suffix" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
               echo "::error::extra-images has '$suffix', not lowercase words joined by '-'."
@@ -86,6 +96,11 @@ jobs:
             fi
             images="$images ${IMAGE}-${suffix}"
           done
+          images=${images# }
+          if [ -z "$images" ]; then
+            echo "::error::own-image is false and extra-images is empty: the application has no image to release."
+            exit 1
+          fi
           echo "IMAGES=$images" >> "$GITHUB_ENV"
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
