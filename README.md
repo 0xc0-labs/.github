@@ -26,6 +26,7 @@ mise.toml                  pinned tool versions
   kustomize-validate.yml   reusable: render each Kustomize component as Argo CD does, and validate it
   pin-check.yml            reusable: each environment's APP_VERSION is its image's newTag
   node-check.yml           reusable: lint, type-check, build and, when asked, test a Node app, with its mise.toml's node and pnpm
+  python-check.yml         reusable: lint, type-check and, when asked, test a Python app with uv, through its mise tasks, with its mise.toml's python and uv
   coverage-comment.yml     reusable: one PR comment with the coverage report node-check uploaded
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
@@ -231,12 +232,46 @@ jobs:
   `working-directory` input of `coverage-comment` only keeps comments of
   different runs apart.
 
-`CHECK_BASE` is in the environment of every step of `node-check`'s `check`
-job: the commit the change starts from, the one `changes` compares against,
-so a monorepo's scripts can check only what the change affects
-(`git diff --name-only "$CHECK_BASE"`). The checkout stays shallow: the
-`base` step fetches that one commit. A repo whose scripts ignore it checks
-exactly as before.
+A Python app, managed with `uv`, checks its code with `python-check`, as a Node
+app does with `node-check`, and takes the same `working-directory`, `runs-on`,
+`tools`, `test`, `skip-paths` and `work-paths` inputs and the same `run`
+output. It installs only `python` and `uv` from the repo's `mise.toml`, at the
+versions there, checked against its `mise.lock`, plus what `tools` names; mise
+is told not to install anything else, so no task's run downloads another tool
+the repo declares, and `uv` uses mise's interpreter and downloads none. Then:
+
+1. `uv sync --locked --all-packages --all-extras --all-groups`: a `uv.lock`
+   that does not match the `pyproject.toml` files fails the job, and every
+   package of a `uv` workspace is installed.
+2. `mise run lint`, then `mise run typecheck`, then, with `test: true`,
+   `mise run test`: the repo's own tasks, so the workflow names no linter,
+   type checker or test runner, and the same task runs on a Mac. A task the
+   repo does not define fails the job with mise's own error. The tests bring
+   up what they need themselves, as `node-check`'s do: `tools: conda:postgresql`.
+
+Its job asks for `contents: read` and nothing else: GitHub Packages has no
+Python index, so there is nothing private to install. It keeps `node-check`'s
+concurrency key and its pass cache on `ready_for_review` (Concurrency), under
+`python-check-passed-…`, and `CHECK_BASE` is in the environment of every step
+(below). Coverage is not part of it yet.
+
+```yaml
+jobs:
+  check:
+    permissions:
+      contents: read
+    uses: 0xc0-labs/.github/.github/workflows/python-check.yml@main
+    with:
+      test: true
+      tools: conda:postgresql
+```
+
+`CHECK_BASE` is in the environment of every step of `node-check`'s and
+`python-check`'s `check` job: the commit the change starts from, the one
+`changes` compares against, so a monorepo's scripts can check only what the
+change affects (`git diff --name-only "$CHECK_BASE"`). The checkout stays
+shallow: the `base` step fetches that one commit. A repo whose scripts ignore
+it checks exactly as before.
 
 | Event | `CHECK_BASE` |
 |---|---|
@@ -838,6 +873,7 @@ workflow ships it (a package's README is in the package):
 |---|---|
 | `semgrep`, `ansible`, `packer`, `tofu-apply`, `package-release`, `release-candidate`, `release` | whatever the central list does not ignore. `ansible` and `packer` then pick the playbooks and templates the change affects. `package-release` also runs on a push to another package, which finds a release left undone, and counts its package's markdown. `release` run by hand always runs |
 | `node-check` | under `working-directory`, plus the root's `mise.toml`, `mise.lock`, `.mise/`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `.npmrc`; with `.`, the whole repo |
+| `python-check` | under `working-directory`, plus the root's `mise.toml`, `mise.lock`, `.mise/`, `pyproject.toml` and `uv.lock`; with `.`, the whole repo |
 | `container-image` | under `context`, and the `file`; with `.`, the whole repo |
 | `tofu-plan` | what `paths` matches, a regex: `^(environments/\|modules/\|mise\.toml$)` by default. A module's `README.md` counts too, the central list notwithstanding: the plan checks it is regenerated |
 | `kustomize-validate` | under each glob of `components`, under `manifests`, and under the other children of each glob's parent: for `platform/* apps/*/prod apps/*/staging`, `apps/<app>/base` counts with the environments that include it. Derived by `.github/actions/component-paths`, so a caller sets nothing |

@@ -1,0 +1,152 @@
+# Reusable: lint, type-check and, with `test: true`, test a Python app managed
+# with uv, through the caller's own mise tasks, with only python and uv from
+# its mise.toml (README, Application repos).
+name: python-check
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory of the app's pyproject.toml and uv.lock, relative to the repo root.
+        type: string
+        default: .
+      runs-on:
+        description: >-
+          Where the job runs, as JSON. Empty by default: GitHub's runners
+          for a public repo, the org's `build` runners (group 0xc0, one per
+          CI VM) for a private one (README, Application repos). Set it, such
+          as '{"group": "0xc0", "labels": ["0xc0"]}', to choose. A PR from a
+          fork always runs on "ubuntu-latest", never on the self-hosted ones.
+        type: string
+        default: ''
+      tools:
+        description: >-
+          mise tools to install besides python and uv, space-separated,
+          pinned in the caller's mise.toml: what the tests need.
+        type: string
+        default: ''
+      test:
+        description: >-
+          Run `mise run test` after lint and typecheck. The tests start what
+          they need themselves; the tools they need go in `tools`.
+        type: boolean
+        default: false
+      skip-paths:
+        description: Globs added to the paths that never cause a check (README, Path gates).
+        type: string
+        default: ''
+      work-paths:
+        description: Globs that always cause a check, even where the central list ignores them (README, Path gates).
+        type: string
+        default: ''
+    outputs:
+      run:
+        description: "'true' when the check ran, 'false' when its path gate skipped it (README, python-check)."
+        value: ${{ jobs.changes.outputs.run }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Under working-directory, and the repo-root files that decide what it
+  # installs: README, Path gates.
+  changes:
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (github.event.repository.private && fromJSON('{"group":"0xc0","labels":"0xc0"}') || 'ubuntu-latest') }}
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - id: changes
+        uses: 0xc0-labs/.github/.github/actions/changes@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          paths: ${{ inputs.working-directory != '.' && format('{0}/** mise.toml mise.lock .mise/** pyproject.toml uv.lock', inputs.working-directory) || '' }}
+          skip-paths: ${{ inputs.skip-paths }}
+          work-paths: ${{ inputs.work-paths }}
+
+  check:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: >-
+      ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest'
+      || fromJSON(inputs.runs-on != '' && inputs.runs-on
+      || (github.event.repository.private && '{"group": "0xc0", "labels": ["build"]}' || '"ubuntu-latest"')) }}
+    # Keyed by working-directory: a caller that checks two apps would
+    # otherwise cancel one with the other (README, Concurrency).
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ inputs.working-directory }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      # mise installs only what install_args names: a task's run, or a
+      # missing tool, never downloads another (README, python-check).
+      MISE_AUTO_INSTALL: 'false'
+      MISE_TASK_RUN_AUTO_INSTALL: 'false'
+      MISE_NOT_FOUND_AUTO_INSTALL: 'false'
+      # uv uses the interpreter mise installed, never one it downloads.
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      # A pass of this same commit stands in for the checks on ready_for_review (README, Concurrency, Drafts).
+      - id: passed
+        if: github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/python-check-passed
+          key: python-check-passed-${{ github.sha }}-${{ inputs.working-directory }}
+          lookup-only: true
+
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Every later step sees the commit the change starts from, the one the
+      # `changes` job compares against (README, node-check, CHECK_BASE).
+      - name: base
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: |
+          case $GITHUB_EVENT_NAME in
+            pull_request | pull_request_target) base=$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH") ;;
+            push) base=$(jq -r '.before // empty' "$GITHUB_EVENT_PATH") ;;
+            merge_group) base=$(jq -r '.merge_group.base_sha // empty' "$GITHUB_EVENT_PATH") ;;
+            *) base= ;;
+          esac
+          if [ -z "${base//0/}" ] || ! git fetch --quiet --depth=1 origin "$base" 2> /dev/null; then
+            base=
+          fi
+          echo "CHECK_BASE=$base" >> "$GITHUB_ENV"
+          echo "CHECK_SCOPE_FILE=$RUNNER_TEMP/check-scope.txt" >> "$GITHUB_ENV"
+          echo "CHECK_BASE=${base:-(empty: check everything)}"
+
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          working_directory: ${{ inputs.working-directory }}
+          install_args: python uv${{ inputs.tools != '' && format(' {0}', inputs.tools) || '' }}
+
+      - name: install
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: uv sync --locked --all-packages --all-extras --all-groups
+
+      - name: lint
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: mise run lint
+
+      - name: typecheck
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: mise run typecheck
+
+      - name: test
+        if: steps.passed.outputs.cache-hit != 'true' && inputs.test
+        run: mise run test
+
+      - name: record the pass
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: echo "$GITHUB_SHA" > "$RUNNER_TEMP/python-check-passed"
+
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/python-check-passed
+          key: python-check-passed-${{ github.sha }}-${{ inputs.working-directory }}
