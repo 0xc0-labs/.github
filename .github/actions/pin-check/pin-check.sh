@@ -33,8 +33,9 @@ application_base() {
     done
     [ "${#common[@]}" -gt 0 ] || return 0
   done <<< "$names"
-  local IFS=-
-  printf '%s\n' "${common[*]}"
+  local joined=${common[0]}
+  for ((i = 1; i < ${#common[@]}; i++)); do joined="$joined-${common[i]}"; done
+  printf '%s\n' "$joined"
 }
 
 # check_images <pin> <version> <owner>, the `<name> <newTag>` rows of the
