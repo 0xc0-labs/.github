@@ -1,0 +1,25 @@
+name: pin-check
+description: >-
+  Each environment's images under ghcr.io/<owner>/ are one application's, and
+  each newTag is APP_VERSION (README, Application repos). Needs yq on the PATH.
+
+inputs:
+  pins:
+    description: Glob of the kustomization.yaml files to check, relative to the repo root.
+    required: true
+  owner:
+    description: The org whose images are the application's.
+    default: ${{ github.repository_owner }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PINS: ${{ inputs.pins }}
+        OWNER: ${{ inputs.owner }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        . "$ACTION_PATH/pin-check.sh"
+        # shellcheck disable=SC2086 # PINS is a list of globs, split on purpose
+        check_pins "$OWNER" $PINS

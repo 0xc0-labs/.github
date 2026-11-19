@@ -443,7 +443,8 @@ application: one version, one rc and one promotion PR cover both.
   rewrites the pin, and a bot's PR that deletes one fails `pin-check`).
   `pin-check` accepts several images under `ghcr.io/<owner>/` in one pin only
   when they are the same repo's, the shortest name and that name with a
-  `-<suffix>`; any other mix fails, as does a `newTag` that is not
+  `-<suffix>` (or, with no own image, per-service images that share a leading
+  word: below); any other mix fails, as does a `newTag` that is not
   `APP_VERSION`.
 
 ```yaml
@@ -575,6 +576,37 @@ jobs:
       app: offby1-cc
       staging: false
 ```
+
+**An application with no image of its own.** A monorepo of services builds
+one image each, `ghcr.io/<repo>-<suffix>`, and none named `ghcr.io/<repo>`
+(Matchmark's `matchmark-api` and `matchmark-stand-in-provider`). Its
+`container-image` jobs each set an `image-suffix`, and its `release` and
+`release-candidate` set `own-image: false` and name every image in
+`extra-images`: the repo's own image is left out of everything they do with
+images, and an empty `extra-images` fails the run. One version still covers
+them all. With no staging:
+
+```yaml
+  release:
+    needs: [image-api, image-stand-in-provider]
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: 0xc0-labs/.github/.github/workflows/release.yml@main
+    with:
+      app: matchmark
+      staging: false
+      own-image: false
+      extra-images: api stand-in-provider
+```
+
+In `gitops`, `pin-check` takes the images under `ghcr.io/<owner>/` as one
+application's when they are `<base>` and `<base>-<suffix>`, or, with no
+`<base>` among them, when they share a leading `-`-separated word
+(`matchmark` for the two above): `matchmark-api` beside `offby1.cc` fails.
+Each `newTag` is still `APP_VERSION`.
 
 GHCR creates every package private, and only the web UI can change that, so
 a new public application takes one manual step. After the first push to
@@ -899,7 +931,9 @@ subdirectory passes them the other paths in `skip-paths`.
 
 `.github/actions/changes/test.sh` holds the decision's cases: run it with
 `bash` after a change to the central list or to the action.
-`.github/actions/component-paths/test.sh` holds `kustomize-validate`'s.
+`.github/actions/component-paths/test.sh` holds `kustomize-validate`'s, and
+`.github/actions/pin-check/test.sh` the cases of which images `pin-check`
+takes as one application's.
 
 ## Semgrep
 

@@ -51,7 +51,6 @@ jobs:
     if: needs.changes.outputs.run == 'true' || (github.event_name == 'pull_request' && contains(fromJSON('["0xc0-labs-promoter[bot]", "0xc0-labs-renovate[bot]"]'), github.event.pull_request.user.login))
     runs-on: ubuntu-latest
     env:
-      PINS: ${{ inputs.pins }}
       OWNER: ${{ github.repository_owner }}
       # The bot's checks read a PR's own diff: a merge group has none, and
       # each of its PRs passed them already. Its commit gets the pins alone.
@@ -121,31 +120,6 @@ jobs:
           echo "$PIN: only its pin changes."
 
       - name: pins
-        run: |
-          status=0
-          for pin in $PINS; do
-            [ -f "$pin" ] || continue
-            version=$(yq '[.configMapGenerator[] | select(.name == "release") | .literals[] | select(test("^APP_VERSION=")) | sub("^APP_VERSION="; "")] | .[0] // ""' "$pin")
-            [ -n "$version" ] || continue
-            # The repo's own image is the shortest name; the others are its
-            # second images, named <repo>-<suffix> (README, Application repos).
-            rows=$(yq '[.images[] | select(.name | test("^ghcr\\.io/" + strenv(OWNER) + "/"))] | sort_by(.name | length) | .[] | .name + " " + (.newTag // "")' "$pin")
-            if [ -z "$rows" ]; then
-              echo "::error file=$pin::APP_VERSION is $version, and no image is under ghcr.io/$OWNER/."
-              status=1
-              continue
-            fi
-            base=${rows%% *}
-            while read -r name tag; do
-              if [ "$name" != "$base" ] && [[ "$name" != "$base"-?* ]]; then
-                echo "::error file=$pin::$name is not the application's: its images under ghcr.io/$OWNER/ are $base and $base-<suffix> alone."
-                status=1
-              elif [ "$tag" != "$version" ]; then
-                echo "::error file=$pin::APP_VERSION is $version, but the newTag of $name is ${tag:-unset}."
-                status=1
-              else
-                echo "$pin: $name $version"
-              fi
-            done <<< "$rows"
-          done
-          exit $status
+        uses: 0xc0-labs/.github/.github/actions/pin-check@main # nosemgrep: third-party-action-not-pinned-to-commit-sha, github-actions-mutable-action-tag - this org's own action, read from main like its reusable workflows
+        with:
+          pins: ${{ inputs.pins }}
