@@ -125,8 +125,6 @@ jobs:
           working_directory: ${{ inputs.working-directory }}
           install_args: python uv${{ inputs.tools != '' && format(' {0}', inputs.tools) || '' }}
 
-      # --locked fails when uv.lock does not match the pyproject.toml files;
-      # --all-packages syncs every member of a uv workspace.
       - name: install
         if: steps.passed.outputs.cache-hit != 'true'
         run: uv sync --locked --all-packages --all-extras --all-groups

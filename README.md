@@ -267,11 +267,11 @@ jobs:
 ```
 
 `CHECK_BASE` is in the environment of every step of `node-check`'s and
-`python-check`'s `check` job: the commit the change starts from, the one `changes` compares against,
-so a monorepo's scripts can check only what the change affects
-(`git diff --name-only "$CHECK_BASE"`). The checkout stays shallow: the
-`base` step fetches that one commit. A repo whose scripts ignore it checks
-exactly as before.
+`python-check`'s `check` job: the commit the change starts from, the one
+`changes` compares against, so a monorepo's scripts can check only what the
+change affects (`git diff --name-only "$CHECK_BASE"`). The checkout stays
+shallow: the `base` step fetches that one commit. A repo whose scripts ignore
+it checks exactly as before.
 
 | Event | `CHECK_BASE` |
 |---|---|
