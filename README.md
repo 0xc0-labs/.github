@@ -27,6 +27,7 @@ mise.toml                  pinned tool versions
   pin-check.yml            reusable: each environment's APP_VERSION is its image's newTag
   node-check.yml           reusable: lint, type-check, build and, when asked, test a Node app, with its mise.toml's node and pnpm
   python-check.yml         reusable: lint, type-check and, when asked, test a Python app with uv, through its mise tasks, with its mise.toml's python and uv
+  factory-verify.yml       reusable: the CI of a repo Matchmark's factory works in; runs the commands of its .factory/repo.yaml in the image it declares, on GitHub's runners
   coverage-comment.yml     reusable: one PR comment with the coverage report node-check uploaded
   container-image.yml      reusable: build an app's image; on main, push it to GHCR as sha-<7> and main
   release-candidate.yml    reusable: on a push to main, cut the next rc and open staging's PR in gitops
@@ -617,6 +618,58 @@ image, and the route answers 503. Later images of the same package are
 public already, and a public package cannot go private again. A private
 application's image stays private: the cluster pulls it with the read-only
 token at `apps/shared/ghcr-pull` in Vault.
+
+### Factory repos
+
+`factory-verify` is the whole CI of a repo Matchmark's factory opens its pull
+requests in (0xc0-labs/workspace#269). It reads the repo's own contract,
+`.factory/repo.yaml`, from the commit under test, and runs the commands it
+declares, in the image it declares. A person adds the caller, because the
+factory's App has no `workflows` permission:
+
+```yaml
+# .github/workflows/ci.yml
+name: ci
+on: [pull_request, push]
+jobs:
+  verify:
+    uses: 0xc0-labs/.github/.github/workflows/factory-verify.yml@main
+```
+
+It takes no input and no secret, and its token reads contents and nothing
+else; the checkout keeps no credentials.
+
+**It runs on GitHub's runners, always, and is not in the runner group's
+`workflows`.** It executes code a coding agent wrote before any person has
+read it, and the org's runners are inside the network. The cost is GitHub's
+minutes, for a private repo too.
+
+**The contract, version 1:**
+
+| Field | |
+|---|---|
+| `version` | required, `1` |
+| `image` | required: one string, pinned by tag or digest, glibc (the checkout and the runner's actions run inside it) |
+| `commands.test` | required, and must exit non-zero on failure |
+| `commands.setup`, `lint`, `typecheck` | optional, each a string |
+| `resources.timeout` | optional, `30m` or `2h`, from 1m to 6h; `30m` when absent. `cpu` and `memory` describe the factory's sandbox, not this job |
+| `services`, `ui`, `build` | refused when present: version 1 does not read them, and does not half obey them |
+| `paths`, `egress` | the factory's, not this workflow's |
+
+A missing or invalid field fails the `contract` job with an error that names
+it. Every value of the file is untrusted: a command reaches the shell as an
+environment variable's value, never as text of the workflow.
+
+**Its jobs**, named for the caller's job (`verify` above), are the checks a
+person reads on the pull request and the factory reads on its head commit:
+
+| Check | What |
+|---|---|
+| `verify / contract` | reads and validates the contract |
+| `verify / commands` | `setup`, `lint`, `typecheck` and `test`, each its own step, in `image`, under `resources.timeout` |
+
+The security scan is not part of it: a repo calls the org's `semgrep.yml`
+beside it (Semgrep).
 
 ### Shared packages
 

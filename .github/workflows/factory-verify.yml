@@ -1,0 +1,126 @@
+# Reusable: the whole CI of a repo Matchmark's factory works in. It reads the
+# repo's contract, .factory/repo.yaml, and runs the commands it declares in the
+# image it declares (README, factory-verify).
+#
+# It runs on GitHub's runners, never the org's, and is not in the runner
+# group's `workflows`: it executes code a coding agent wrote before any person
+# has read it, and the org's runners are inside the network. It takes no
+# secret and no input.
+name: factory-verify
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # The image of the next job is decided before its steps run, so the contract
+  # is read here and handed over as outputs. Every value of it is untrusted:
+  # none is echoed into a workflow command or a script.
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.read.outputs.image }}
+      setup: ${{ steps.read.outputs.setup }}
+      lint: ${{ steps.read.outputs.lint }}
+      typecheck: ${{ steps.read.outputs.typecheck }}
+      test: ${{ steps.read.outputs.test }}
+      timeout: ${{ steps.read.outputs.timeout }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: read
+        shell: bash
+        run: |
+          set -eu
+          file=.factory/repo.yaml
+          fail() { echo "::error file=$file::$1"; exit 1; }
+          out() {
+            local delimiter
+            delimiter=$(openssl rand -hex 16)
+            printf '%s<<%s\n%s\n%s\n' "$1" "$delimiter" "$2" "$delimiter" >> "$GITHUB_OUTPUT"
+          }
+
+          [ -f "$file" ] || fail "The repo has no $file: the contract factory-verify runs is missing."
+          contract=$(yq -o=json '.' "$file" 2> /dev/null) || fail "$file is not valid YAML."
+          check() { printf '%s' "$contract" | jq -e "$1" > /dev/null; }
+          field() { printf '%s' "$contract" | jq -r "$1"; }
+
+          check 'type == "object"' || fail "$file must be a mapping."
+          check '.version == 1' || fail "version must be 1: this workflow reads only version 1 of the contract."
+          for key in services ui build; do
+            check "has(\"$key\") | not" || fail "$key is not read by contract version 1 yet, and is refused rather than half obeyed."
+          done
+          check '(.image | type) == "string" and (.image | test("^[^[:space:]]+$"))' \
+            || fail "image is required: one string with no whitespace, pinned by tag or digest."
+          check '(.commands | type) == "object"' || fail "commands is required, with at least commands.test."
+          check '(.commands.test | type) == "string" and (.commands.test | test("[^[:space:]]"))' \
+            || fail "commands.test is required: a non-empty string."
+          for name in setup lint typecheck; do
+            check "(.commands.$name // \"x\") | type == \"string\"" || fail "commands.$name must be a string."
+          done
+
+          minutes=30
+          if check '.resources.timeout != null'; then
+            check '(.resources.timeout | type) == "string" and (.resources.timeout | test("^[0-9]{1,4}[mh]$"))' \
+              || fail "resources.timeout must be a number of minutes or hours, as 30m or 2h."
+            timeout=$(field '.resources.timeout')
+            minutes=$((10#${timeout%?}))
+            [ "${timeout#"${timeout%?}"}" = h ] && minutes=$((minutes * 60))
+            { [ "$minutes" -ge 1 ] && [ "$minutes" -le 360 ]; } || fail "resources.timeout must be between 1m and 6h."
+          fi
+
+          out image "$(field '.image')"
+          out setup "$(field '.commands.setup // empty')"
+          out lint "$(field '.commands.lint // empty')"
+          out typecheck "$(field '.commands.typecheck // empty')"
+          out test "$(field '.commands.test')"
+          out timeout "$minutes"
+
+  # The checks a person reads on the pull request are this job and `contract`,
+  # named for the caller's job: `verify / contract`, `verify / commands`.
+  commands:
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(needs.contract.outputs.timeout) }}
+    container:
+      image: ${{ needs.contract.outputs.image }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        shell: sh -e {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A command reaches the shell as an environment variable's value, never
+      # as text of this file.
+      - name: setup
+        if: needs.contract.outputs.setup != ''
+        env:
+          FACTORY_COMMAND: ${{ needs.contract.outputs.setup }}
+        run: eval "$FACTORY_COMMAND"
+
+      - name: lint
+        if: needs.contract.outputs.lint != ''
+        env:
+          FACTORY_COMMAND: ${{ needs.contract.outputs.lint }}
+        run: eval "$FACTORY_COMMAND"
+
+      - name: typecheck
+        if: needs.contract.outputs.typecheck != ''
+        env:
+          FACTORY_COMMAND: ${{ needs.contract.outputs.typecheck }}
+        run: eval "$FACTORY_COMMAND"
+
+      - name: test
+        env:
+          FACTORY_COMMAND: ${{ needs.contract.outputs.test }}
+        run: eval "$FACTORY_COMMAND"
