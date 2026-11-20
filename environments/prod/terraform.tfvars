@@ -70,6 +70,12 @@ repositories = {
     visibility  = "private"
     auto_init   = true
   }
+  "matchmark-playground" = {
+    description = "A playground for Matchmark's factory: the repo its agents open pull requests in"
+    topics      = ["0xc0"]
+    visibility  = "private"
+    auto_init   = true
+  }
 }
 
 # The repos whose CI needs the network, and the applications' jobs that run
@@ -81,7 +87,7 @@ repositories = {
 # to save those minutes; the Next.js builds stay on GitHub's runners for now.
 runner_group = {
   name         = "0xc0"
-  repositories = [".github", "infrastructure", "vault", "artistlabco.com", "packages", "offby1.cc", "matchmark", "matchmark-config"]
+  repositories = [".github", "infrastructure", "vault", "artistlabco.com", "packages", "offby1.cc", "matchmark", "matchmark-config", "matchmark-playground"]
   workflows = [
     "0xc0-labs/.github/.github/workflows/ansible.yml@refs/heads/main",
     "0xc0-labs/.github/.github/workflows/packer.yml@refs/heads/main",
