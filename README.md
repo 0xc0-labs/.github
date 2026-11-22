@@ -371,7 +371,9 @@ alone): **every push to `main`** is a release, and merging prod's PR is the
 approval (operator decision, 2026-10-12). After the image, `release`, with
 `staging: false`, releases the commit pushed: the version `git-cliff`
 computes, as for an rc, but with no rc; the image's `sha-<7>` digest tagged
-with it; then the tag, the Release and prod's PR as in 2,
+with it (an image of the repo's that the commit did not build takes its
+newest build on `main`, not prod's pin: Application repos, `extra-images`);
+then the tag, the Release and prod's PR as in 2,
 closing the older prod PRs still open. Nothing of staging is read or
 written. A push releases nothing, and says so in a notice, when a later
 release contains its commit (a rerun, after a newer push released), or when
@@ -434,9 +436,15 @@ application: one version, one rc and one promotion PR cover both.
   skipped it, the repo's own included) keeps its digest: the rc takes the one
   staging pins, as of the promotion still open if there is one, else of
   `main`, since the queue merges the previous promotion after its run ended;
-  the release takes the rc's, and with no staging, prod's. It is tagged with
-  the new version all the same. The rc fails when staging pins none: the first
-  rc of an image needs it built for that commit. A release reads every image's pin in staging, which must
+  the release takes the rc's, and with no staging, that image's newest build
+  on `main`: the `sha-<7>` tag of the nearest commit before the released one
+  that built it, and only when none exists, prod's pin. Prod's pin is not the
+  newest build where promotions are superseded: commit A builds X and releases
+  v1, whose PR is closed unmerged; commit B builds Y alone and releases v2,
+  which would take prod's older X; it takes A's. The run says which digest it
+  took and from which commit. It is tagged with the new version all the same.
+  The rc fails when staging pins none: the first rc of an image needs it
+  built for that commit. A release reads every image's pin in staging, which must
   all be at the same rc, and checks each rc tag against its digest.
 - **In `gitops`**: an `images:` entry for each, `ghcr.io/0xc0-labs/<repo>` and
   `ghcr.io/0xc0-labs/<repo>-cms`, both with `newTag` equal to `APP_VERSION`,
@@ -1002,6 +1010,11 @@ them), added to the workflow's own and never replacing them:
 No caller needs either today. `container-image` reads its `context`, but
 `release-candidate` and `release` do not: an app whose image holds a
 subdirectory passes them the other paths in `skip-paths`.
+
+A path gate on an image build leaves a release with an image its commit did
+not build. With no staging, `release` takes that image's newest build on
+`main`, not prod's pin, which lags where earlier promotions were closed
+unmerged (Application repos, `extra-images`).
 
 `.github/actions/changes/test.sh` holds the decision's cases: run it with
 `bash` after a change to the central list or to the action.
