@@ -654,7 +654,8 @@ minutes, for a private repo too.
 | `commands.setup`, `lint`, `typecheck` | optional, each a string |
 | `resources.timeout` | optional, `30m` or `2h`, from 1m to 6h; `30m` when absent. `cpu` and `memory` describe the factory's sandbox, not this job |
 | `services`, `ui`, `build` | refused when present: version 1 does not read them, and does not half obey them |
-| `paths`, `egress` | the factory's, not this workflow's |
+| `paths.acceptance_tests` | optional: a path inside the repo, as `tests/acceptance`, no leading dash or slash, no `..`, no spaces; invalid, it fails `contract`. Read by `acceptance` below; the rest of `paths` is the factory's |
+| `egress` | the factory's, not this workflow's |
 
 A missing or invalid field fails the `contract` job with an error that names
 it. Every value of the file is untrusted: a command reaches the shell as an
@@ -667,6 +668,26 @@ person reads on the pull request and the factory reads on its head commit:
 |---|---|
 | `verify / contract` | reads and validates the contract |
 | `verify / commands` | `setup`, `lint`, `typecheck` and `test`, each its own step, in `image`, under `resources.timeout` |
+| `verify / acceptance` | the acceptance tests as a run of their own: `setup` and `test`, in `image`, under `resources.timeout` |
+
+**`acceptance`** exists so Matchmark's evidence can say the acceptance tests
+ran and how they ended, and not only that the whole `test` command passed.
+It runs the contract's `test` command again with the path handed over in the
+environment variable `FACTORY_ACCEPTANCE_PATH` (the value of
+`paths.acceptance_tests`, no trailing slash); `commands` runs it without the
+variable. So a contract supports it by having its `test` command read the
+variable and fall back to everything when it is unset, as
+`uv run pytest ${FACTORY_ACCEPTANCE_PATH:-.}`. A `test` command that ignores
+the variable runs the whole suite in `acceptance` too: the check passes, and
+proves no more than `commands` does. The path is never appended as an
+argument.
+
+It runs only when `paths.acceptance_tests` is set and the path holds at least
+one file other than `.gitkeep`, `__init__.py` and `conftest.py`. Otherwise the
+job is **skipped**, which GitHub reports as skipped and never as passed. What
+Matchmark reads is that check run, matched by the last part of its name,
+`acceptance`: its conclusion is `success`, `failure` or `skipped`. A caller
+needs no change.
 
 The security scan is not part of it: a repo calls the org's `semgrep.yml`
 beside it (Semgrep).
