@@ -144,7 +144,10 @@ jobs:
 
       # One line a image in $RUNNER_TEMP/digests, `<image> <digest>`. A second
       # image whose paths did not change was not built: with no staging it
-      # keeps the digest prod pins.
+      # takes the digest of its newest build on the default branch, found by
+      # walking back from the released commit, and only with none the digest
+      # prod pins. Prod's pin is not the newest build where promotions are
+      # superseded: an earlier release's PR may have been closed unmerged.
       - name: image
         id: image
         working-directory: _gitops
@@ -165,14 +168,28 @@ jobs:
               if digest=$(crane digest "$image:sha-${GITHUB_SHA::7}" 2> "$RUNNER_TEMP/crane.err"); then
                 echo "$image: built for this commit."
               elif [ "$image" != "$IMAGE" ] && grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN' "$RUNNER_TEMP/crane.err"; then
-                pin="apps/$APP/prod/kustomization.yaml"
-                [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
-                digest=$(IMAGE=$image yq '.images[] | select(.name == strenv(IMAGE)) | .digest // ""' "$pin")
-                if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-                  echo "::error file=$pin::$image is not built for this commit, and prod pins no digest of it."
-                  exit 1
+                built=""
+                if crane ls "$image" 2> /dev/null | grep -E '^sha-[0-9a-f]{7}$' > "$RUNNER_TEMP/built-tags"; then
+                  while read -r sha; do
+                    if grep -qx "sha-${sha::7}" "$RUNNER_TEMP/built-tags"; then
+                      built=$sha
+                      break
+                    fi
+                  done < <(git -C "$GITHUB_WORKSPACE" rev-list "$GITHUB_SHA")
                 fi
-                echo "$image: not built for this commit, so prod's $digest."
+                if [ -n "$built" ]; then
+                  digest=$(crane digest "$image:sha-${built::7}")
+                  echo "$image: not built for this commit, so its newest build, $digest, of ${built::7}."
+                else
+                  pin="apps/$APP/prod/kustomization.yaml"
+                  [ -f "$pin" ] || { echo "::error::gitops has no $pin."; exit 1; }
+                  digest=$(IMAGE=$image yq '.images[] | select(.name == strenv(IMAGE)) | .digest // ""' "$pin")
+                  if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                    echo "::error file=$pin::$image was never built from this history, and prod pins no digest of it."
+                    exit 1
+                  fi
+                  echo "::notice::$image was never built from this history, so prod's $digest."
+                fi
               else
                 cat "$RUNNER_TEMP/crane.err"
                 echo "::error::No image $image:sha-${GITHUB_SHA::7}: the image job runs first."
