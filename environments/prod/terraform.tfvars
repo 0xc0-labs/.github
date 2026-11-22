@@ -105,3 +105,11 @@ runner_group = {
     "0xc0-labs/.github/.github/workflows/coverage-comment.yml@refs/heads/main",
   ]
 }
+
+# The runners that live in the cluster (workspace#279): a pilot, for
+# matchmark's Python check alone. The CI VMs' runners stay `runner_group`.
+cluster_runner_group = {
+  name         = "0xc0-cluster"
+  repositories = ["matchmark"]
+  workflows    = ["0xc0-labs/.github/.github/workflows/python-check.yml@refs/heads/main"]
+}

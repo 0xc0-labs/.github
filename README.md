@@ -9,7 +9,7 @@ which GitHub shows on the organization page.
 ```
 profile/README.md          the org page: what the project is
 modules/repository/        every repo is created through this module
-modules/runner-group/      the runner group for the self-hosted runners on the CI VMs
+modules/runner-group/      the runner groups: the CI VMs' self-hosted runners, and the cluster's
 environments/prod/         root: calls the modules
 scripts/tofu               runs tofu on an environment, secrets read from Vault into env
 mise.toml                  pinned tool versions
@@ -122,6 +122,17 @@ the reusable workflows already, as they
 are on `main`, but only from the repos in `runner_group.repositories`, in
 `environments/prod/terraform.tfvars`: the caller of a workflow that runs
 there must have its repo listed.
+
+**A second group, `0xc0-cluster`, is for the runners that live in the
+cluster** (a runner scale set that `gitops` deploys;
+0xc0-labs/workspace#279), not the CI VMs'. It is a pilot: only `matchmark`
+may use it, and only through `python-check`'s check job
+(`cluster_runner_group` in the same `terraform.tfvars`). A caller asks for it
+with `runs-on` set to the scale set's name as a JSON string,
+`'"0xc0-cluster"'`: GitHub documents a scale set as targeted by its name, and
+does not document the `group` form of `runs-on` for scale sets.
+`python-check` hands the input to `fromJSON`, so it needs no change; its
+`changes` job stays on the `0xc0` group.
 
 **Secrets come from Vault, and no repo holds any** (operator decision,
 2026-10-01). The job logs in with its GitHub OIDC token (JWT auth, through
