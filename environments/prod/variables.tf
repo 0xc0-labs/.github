@@ -71,17 +71,3 @@ variable "runner_group" {
     error_message = "The runner group lists a repository that is not managed here."
   }
 }
-
-variable "cluster_runner_group" {
-  description = "The runner group of the runners that live in the cluster, and the managed repositories that may use it."
-  type = object({
-    name         = string
-    repositories = list(string)
-    workflows    = list(string)
-  })
-
-  validation {
-    condition     = alltrue([for repo in var.cluster_runner_group.repositories : contains(keys(var.repositories), repo)])
-    error_message = "The cluster runner group lists a repository that is not managed here."
-  }
-}

@@ -9,7 +9,7 @@ which GitHub shows on the organization page.
 ```
 profile/README.md          the org page: what the project is
 modules/repository/        every repo is created through this module
-modules/runner-group/      the runner groups: the CI VMs' self-hosted runners, and the cluster's
+modules/runner-group/      the runner group for the self-hosted runners on the CI VMs
 environments/prod/         root: calls the modules
 scripts/tofu               runs tofu on an environment, secrets read from Vault into env
 mise.toml                  pinned tool versions
@@ -122,16 +122,6 @@ the reusable workflows already, as they
 are on `main`, but only from the repos in `runner_group.repositories`, in
 `environments/prod/terraform.tfvars`: the caller of a workflow that runs
 there must have its repo listed.
-
-**A second group, `0xc0-cluster`, is for the runners that live in the
-cluster** (just-in-time self-hosted runners that `gitops` deploys, with the
-label `0xc0-cluster`; 0xc0-labs/workspace#279, 0xc0-labs/gitops#582), not the
-CI VMs'. It is a pilot: only `matchmark` may use it, and only through
-`python-check`'s check job (`cluster_runner_group` in the same
-`terraform.tfvars`). A caller asks for it as it asks for the CI VMs' group,
-with `runs-on` set to `'{"group": "0xc0-cluster", "labels": ["0xc0-cluster"]}'`.
-`python-check` hands the input to `fromJSON`, so it needs no change; its
-`changes` job stays on the `0xc0` group.
 
 **Secrets come from Vault, and no repo holds any** (operator decision,
 2026-10-01). The job logs in with its GitHub OIDC token (JWT auth, through

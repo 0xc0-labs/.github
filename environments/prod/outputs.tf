@@ -7,8 +7,3 @@ output "runner_group" {
   description = "Name of the self-hosted runner group, for the runners on the CI VMs."
   value       = module.runner_group.name
 }
-
-output "cluster_runner_group" {
-  description = "Name of the runner group for the runners that live in the cluster."
-  value       = module.cluster_runner_group.name
-}

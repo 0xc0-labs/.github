@@ -23,11 +23,3 @@ module "runner_group" {
   repository_ids = [for repo in var.runner_group.repositories : module.repositories[repo].repo_id]
   workflows      = var.runner_group.workflows
 }
-
-module "cluster_runner_group" {
-  source = "../../modules/runner-group"
-
-  name           = var.cluster_runner_group.name
-  repository_ids = [for repo in var.cluster_runner_group.repositories : module.repositories[repo].repo_id]
-  workflows      = var.cluster_runner_group.workflows
-}
