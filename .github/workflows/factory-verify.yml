@@ -28,6 +28,8 @@ jobs:
       typecheck: ${{ steps.read.outputs.typecheck }}
       test: ${{ steps.read.outputs.test }}
       timeout: ${{ steps.read.outputs.timeout }}
+      acceptance_path: ${{ steps.read.outputs.acceptance_path }}
+      acceptance: ${{ steps.read.outputs.acceptance }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,12 +76,31 @@ jobs:
             { [ "$minutes" -ge 1 ] && [ "$minutes" -le 360 ]; } || fail "resources.timeout must be between 1m and 6h."
           fi
 
+          # A path of the checkout and nothing else: it reaches the test
+          # command as an environment variable, and a value that starts with
+          # a dash, climbs out with `..` or holds a space is refused here.
+          acceptance_path=
+          acceptance=false
+          if check '.paths.acceptance_tests != null'; then
+            check '(.paths.acceptance_tests | type) == "string" and (.paths.acceptance_tests | test("^[A-Za-z0-9_][A-Za-z0-9._/-]*$")) and (.paths.acceptance_tests | split("/") | index("..") | not)' \
+              || fail "paths.acceptance_tests must be a path inside the repo, as tests/acceptance: no leading dash or slash, no .., no spaces."
+            acceptance_path=$(field '.paths.acceptance_tests')
+            acceptance_path=${acceptance_path%/}
+            # A path with no test file under it is an acceptance run that
+            # would pass on nothing, so it is skipped: markers do not count.
+            if [ -n "$(find "$acceptance_path" -type f ! -name '.gitkeep' ! -name '__init__.py' ! -name 'conftest.py' -print -quit 2> /dev/null)" ]; then
+              acceptance=true
+            fi
+          fi
+
           out image "$(field '.image')"
           out setup "$(field '.commands.setup // empty')"
           out lint "$(field '.commands.lint // empty')"
           out typecheck "$(field '.commands.typecheck // empty')"
           out test "$(field '.commands.test')"
           out timeout "$minutes"
+          out acceptance_path "$acceptance_path"
+          out acceptance "$acceptance"
 
   # The checks a person reads on the pull request are this job and `contract`,
   # named for the caller's job: `verify / contract`, `verify / commands`.
@@ -123,4 +144,37 @@ jobs:
       - name: test
         env:
           FACTORY_COMMAND: ${{ needs.contract.outputs.test }}
+        run: eval "$FACTORY_COMMAND"
+
+  # The contract's `test` command, run again with the acceptance path in
+  # FACTORY_ACCEPTANCE_PATH so Matchmark can read a run of the acceptance
+  # tests alone. Skipped, not passed, when there is nothing to run.
+  acceptance:
+    needs: contract
+    if: needs.contract.outputs.acceptance == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(needs.contract.outputs.timeout) }}
+    container:
+      image: ${{ needs.contract.outputs.image }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-acceptance
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        shell: sh -e {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: setup
+        if: needs.contract.outputs.setup != ''
+        env:
+          FACTORY_COMMAND: ${{ needs.contract.outputs.setup }}
+        run: eval "$FACTORY_COMMAND"
+
+      - name: test
+        env:
+          FACTORY_COMMAND: ${{ needs.contract.outputs.test }}
+          FACTORY_ACCEPTANCE_PATH: ${{ needs.contract.outputs.acceptance_path }}
         run: eval "$FACTORY_COMMAND"
