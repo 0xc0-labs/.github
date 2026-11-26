@@ -49,7 +49,7 @@ variable "production_environment_reviewers" {
 }
 
 variable "production_environment_reviewer_teams" {
-  description = "GitHub team IDs who may approve every apply from this repo, beside the users. Used only when production_environment_reviewers is not empty."
+  description = "GitHub team IDs who may approve every apply from this repo, beside the users. Each also gets read on the repo, or GitHub drops it as a reviewer. Used only when production_environment_reviewers is not empty."
   type        = list(number)
   default     = []
 }

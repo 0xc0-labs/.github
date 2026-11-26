@@ -1180,8 +1180,10 @@ installing the `0xc0` plugin on each machine, are in `claude-config`'s
 `0xc0-labs/admins` is the team that operates the estate. Its members can
 approve production applies, beside the operator: it is a reviewer of every
 `production` environment. It is also what Cloudflare Access, Argo CD, Grafana
-and Vault check to let someone in. It holds no repository permissions: its
-members are org members with their usual access.
+and Vault check to let someone in. It holds read (`pull`) on each repo that has
+a production environment, and nothing else: GitHub silently drops a reviewer
+team that has no access to the repo, so do not remove that permission as
+unused. Its members are otherwise org members with their usual access.
 
 To add or remove an admin, add or remove one line of `admins` in
 `environments/prod/terraform.tfvars` (login and role, `member` or
