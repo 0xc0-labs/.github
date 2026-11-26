@@ -1,3 +1,11 @@
+module "admins_team" {
+  source = "../../modules/team"
+
+  name        = "admins"
+  description = "Operate the estate: full access, by GitHub sign-in"
+  members     = var.admins
+}
+
 module "repositories" {
   source   = "../../modules/repository"
   for_each = var.repositories
@@ -13,7 +21,8 @@ module "repositories" {
 
   required_status_checks = each.value.required_checks
 
-  production_environment_reviewers = each.value.production_environment ? [var.operator_user_id] : []
+  production_environment_reviewers      = each.value.production_environment ? [var.operator_user_id] : []
+  production_environment_reviewer_teams = each.value.production_environment ? [module.admins_team.id] : []
 }
 
 module "runner_group" {

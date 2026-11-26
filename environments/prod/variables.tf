@@ -19,6 +19,11 @@ variable "operator_user_id" {
   type        = number
 }
 
+variable "admins" {
+  description = "Members of the admins team, GitHub login to role (member or maintainer). They approve production applies beside the operator."
+  type        = map(string)
+}
+
 # Command line only: committed, it would leave every ruleset disabled.
 variable "bootstrap" {
   description = "True only for the org's very first apply, before any history is pushed: every ruleset is created disabled so each main can receive its initial push. A repo added later uses its own bootstrap in repositories instead."

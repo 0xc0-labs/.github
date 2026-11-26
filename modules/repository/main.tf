@@ -111,6 +111,7 @@ resource "github_repository_environment" "main" {
 
   reviewers {
     users = var.production_environment_reviewers
+    teams = var.production_environment_reviewer_teams
   }
 
   deployment_branch_policy {
