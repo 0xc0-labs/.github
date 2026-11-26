@@ -10,6 +10,7 @@ which GitHub shows on the organization page.
 profile/README.md          the org page: what the project is
 modules/repository/        every repo is created through this module
 modules/runner-group/      the runner group for the self-hosted runners on the CI VMs
+modules/team/              a GitHub team and its membership
 environments/prod/         root: calls the modules
 scripts/tofu               runs tofu on an environment, secrets read from Vault into env
 mise.toml                  pinned tool versions
@@ -1173,6 +1174,19 @@ How its `main` gets its first commit decides the rest:
 The module creates no files in the repo. Its `.claude/settings.json`, and
 installing the `0xc0` plugin on each machine, are in `claude-config`'s
 [Installing](https://github.com/0xc0-labs/claude-config#installing).
+
+## The admins team
+
+`0xc0-labs/admins` is the team that operates the estate. Its members can
+approve production applies, beside the operator: it is a reviewer of every
+`production` environment. It is also what Cloudflare Access, Argo CD, Grafana
+and Vault check to let someone in. It holds no repository permissions: its
+members are org members with their usual access.
+
+To add or remove an admin, add or remove one line of `admins` in
+`environments/prod/terraform.tfvars` (login and role, `member` or
+`maintainer`), then apply. The list is authoritative: a login not in it is
+removed from the team.
 
 ## Concurrency
 

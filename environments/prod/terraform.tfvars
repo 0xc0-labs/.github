@@ -1,5 +1,10 @@
 operator_user_id = 94703619 # sergioaten
 
+# The admins team. Cloudflare Access, Argo CD, Grafana and Vault check it.
+admins = {
+  sergioaten = "maintainer"
+}
+
 # Topics: 0xc0 on every repo, app on every application, plus one per tool
 # the repo actually contains.
 repositories = {
