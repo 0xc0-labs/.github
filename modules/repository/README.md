@@ -42,6 +42,7 @@ No modules.
 | [github_repository_environment_deployment_policy.main](https://registry.terraform.io/providers/integrations/github/6.13.0/docs/resources/repository_environment_deployment_policy) | resource |
 | [github_repository_ruleset.main](https://registry.terraform.io/providers/integrations/github/6.13.0/docs/resources/repository_ruleset) | resource |
 | [github_repository_vulnerability_alerts.main](https://registry.terraform.io/providers/integrations/github/6.13.0/docs/resources/repository_vulnerability_alerts) | resource |
+| [github_team_repository.environment_reviewers](https://registry.terraform.io/providers/integrations/github/6.13.0/docs/resources/team_repository) | resource |
 
 ## Inputs
 
