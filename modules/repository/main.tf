@@ -102,6 +102,16 @@ resource "github_repository_ruleset" "main" {
   }
 }
 
+# GitHub drops, without an error, a reviewer team that has no access to the
+# repo; being public does not count.
+resource "github_team_repository" "environment_reviewers" {
+  count = length(var.production_environment_reviewers) > 0 ? length(var.production_environment_reviewer_teams) : 0
+
+  team_id    = var.production_environment_reviewer_teams[count.index]
+  repository = github_repository.main.name
+  permission = "pull"
+}
+
 # The reviewer's approval is the human launching the apply.
 resource "github_repository_environment" "main" {
   count = length(var.production_environment_reviewers) > 0 ? 1 : 0
@@ -113,6 +123,8 @@ resource "github_repository_environment" "main" {
     users = var.production_environment_reviewers
     teams = var.production_environment_reviewer_teams
   }
+
+  depends_on = [github_team_repository.environment_reviewers]
 
   deployment_branch_policy {
     protected_branches     = false
