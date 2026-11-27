@@ -13,7 +13,7 @@ on:
       runs-on:
         description: >-
           Where the job runs, as JSON. Empty by default: GitHub's runners
-          for a public repo, the org's `build` runners (group 0xc0, one per
+          for a public repo, the org's `build` runners (group 0xc0, two per
           CI VM) for a private one (README, Application repos). Set it, such
           as '{"group": "0xc0", "labels": ["0xc0"]}', to choose. A PR from a
           fork always runs on "ubuntu-latest", never on the self-hosted ones.

@@ -27,7 +27,8 @@ into the workspace repo at exactly the path GitHub reads.
   A repo or a permission that exists on GitHub but not in Terraform shows up
   as a diff, and that is a finding, not a curiosity.
 - The self-hosted runners live on the two CI VMs, `vm-ci-01` (10.10.1.10) and
-  `vm-ci-02` (10.10.1.20), ephemeral, two on each. Do not register others.
+  `vm-ci-02` (10.10.1.20), ephemeral, four on each, two of them with the
+  `build` label. Do not register others.
 - A reusable workflow that needs the network, or that a private repo runs,
   is listed in the runner group's `workflows`.
 

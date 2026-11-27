@@ -29,7 +29,7 @@ on:
       runs-on:
         description: >-
           Where the job runs, as JSON. Empty by default: GitHub's runners
-          for a public repo, the org's `build` runners (group 0xc0, one per
+          for a public repo, the org's `build` runners (group 0xc0, two per
           CI VM) for a private one (README, Application repos). Set it, such
           as '{"group": "0xc0", "labels": ["0xc0"]}', to choose. A PR from a
           fork always runs on "ubuntu-latest", never on the self-hosted ones.
@@ -209,7 +209,7 @@ jobs:
           echo "seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
           echo "digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/build.json")" >> "$GITHUB_OUTPUT"
 
-      # What a build costs a CI VM, whose 2 vCPU and 4 GB its two runners
+      # What a build costs a CI VM, whose 8 vCPU and 12 GB its four runners
       # share: how long it took, and the peak memory of the instance's
       # BuildKit unit, which starts empty before every job.
       - name: footprint
