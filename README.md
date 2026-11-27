@@ -323,8 +323,8 @@ Where they run:
 Why a private application's checks and image left the CI VMs, and came back
 on the `build` runners (operator decisions, 2026-10-12, workspace#138;
 2026-10-14, workspace#180): two Next.js builds at once hung a CI
-VM, whose 2 vCPU and 4 GB its two runners share, and blocked CI for about 35
-minutes (infrastructure#235), and the node has no memory left to give them
+VM, whose 2 vCPU and 4 GB its two runners shared, and blocked CI for about 35
+minutes (infrastructure#235), and the node had no memory left to give them
 (62 GB, 60 allocated). A private repo's GitHub runner has 2 CPU and 8 GB to
 itself. The cost is GitHub Free's 2,000 minutes a month, shared by the org's
 private repos: once they run out, their jobs on GitHub's runners are
