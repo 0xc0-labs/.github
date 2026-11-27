@@ -117,7 +117,7 @@ group `0xc0` for a private repo, `ubuntu-latest` for a public one, whose
 minutes are free. The runners have `curl` and `jq` but not `gh`, so the
 `changes` action reads the compare with `curl` there. The Next.js builds,
 `node-check`'s `check` and `container-image`'s `image`, run in a private
-repo on the `build` runners, one per VM (workspace#180, Application repos,
+repo on the `build` runners, two per VM (workspace#180, Application repos,
 below); a public repo's stay on GitHub's runners. The runner group admits
 the reusable workflows already, as they
 are on `main`, but only from the repos in `runner_group.repositories`, in
@@ -301,8 +301,8 @@ force-pushes.
 Where they run:
 
 - **A private application's checks and image** (`artistlabco.com`) run on the org's runners, the `0xc0` group, on those that
-  carry the label `build`: one per CI VM, so a VM never runs two builds at
-  once. The caller passes no `runs-on`: the workflows pick the group from the
+  carry the label `build`: two per CI VM, so a VM never runs more than two
+  builds at once. The caller passes no `runs-on`: the workflows pick the group from the
   repo's visibility. The light jobs around them, `changes`, `pr-issue`,
   `coverage-comment` and `semgrep`, run on the org's runners too, on any of
   them (workspace#180): GitHub bills each job at least one minute, and they
@@ -330,9 +330,12 @@ itself. The cost is GitHub Free's 2,000 minutes a month, shared by the org's
 private repos: once they run out, their jobs on GitHub's runners are
 blocked, not billed. `payload` used about 320 from 2026-10-01 to 10-12. The
 rc and release, on the CI VMs, use none of them. With 941 minutes left on
-2026-10-14, the builds came back to the CI VMs, now one per VM: the `build`
-label caps it at one build per VM, and each app bounds its build's memory
-(payload#93, artistlabco.com#30).
+2026-10-14, the builds came back to the CI VMs, at one build per VM: the `build`
+label capped it at one build per VM, and each app bounds its build's memory
+(payload#93, artistlabco.com#30). Since 2026-11-27 (infrastructure#350) a CI
+VM has 8 cores and 12 GB and runs four runner instances, two of them with
+the `build` label: two builds fit in the 12 GB, and each gets about four
+cores.
 
 The build carries a `mode=max` provenance and an SBOM, from a scanner image
 pinned by digest.
